@@ -48,6 +48,10 @@ data class AccountState(
     val confirmationEmail: String? = null,
     /** Signed in through a recovery link; the new password has not been chosen yet. */
     val passwordRecovery: Boolean = false,
+    /** Address and [android.os.SystemClock.elapsedRealtime] of the last recovery email sent. */
+    val recoveryEmailSent: SentEmail? = null,
+    /** [android.os.SystemClock.elapsedRealtime] of the last confirmation email sent. */
+    val confirmationSentAt: Long? = null,
     val loginRevision: Int = 0,
     val profile: AccountProfile? = null,
     val schedules: List<ScheduleDto> = emptyList(),
@@ -69,6 +73,11 @@ data class AccountState(
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
 }
+
+data class SentEmail(val address: String, val at: Long)
+
+/** Wait before offering to send the same kind of email again; the server also limits how often it sends. */
+const val EMAIL_RESEND_SECONDS = 60
 
 private const val SAVE_FAILED = "No se pudieron guardar los datos. Inténtalo de nuevo."
 private const val LOAD_FAILED = "No se pudieron cargar tus datos. Inténtalo de nuevo en unos minutos."
@@ -93,12 +102,18 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 // Initializing has no user yet; wait until the SDK finishes restoring its session.
                 if (it is io.github.jan.supabase.auth.status.SessionStatus.Initializing) return@collect
                 if (user == null) {
-                    _state.value = AccountState(initializing = false)
+                    PendingPasswordRecovery.clear(getApplication())
+                    // Keep the resend countdowns: signing out does not let the server send sooner.
+                    _state.value = AccountState(initializing = false,
+                        recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
                     com.example.findme.widget.WidgetStore.clear(getApplication())
                     AccountCache.clear(getApplication())
                 }
                 else if (_state.value.profile?.id != user.id) {
-                    _state.update { old -> old.copy(initializing = false, signedIn = true) }
+                    // A recovery link that was opened but never finished still demands the new password.
+                    val recovering = PendingPasswordRecovery.isPending(getApplication(), user.id)
+                    _state.update { old -> old.copy(initializing = false, signedIn = true,
+                        passwordRecovery = old.passwordRecovery || recovering) }
                     // This device receives this account's pushes from now on.
                     launch { com.example.findme.push.PushTokens.register() }
                     // Show the last successful sync at once, then refresh it from the network.
@@ -158,13 +173,21 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun requestPasswordReset(email: String) = perform {
         require(com.example.findme.domain.model.Registration.isEmail(email)) { "Introduce un correo válido." }
         repository.requestPasswordReset(email)
-        _state.update { it.copy(notice = "Si ese correo tiene una cuenta, recibirás un enlace para elegir otra contraseña. " +
+        _state.update { it.copy(recoveryEmailSent = SentEmail(email.trim(), android.os.SystemClock.elapsedRealtime()),
+            notice = "Si ese correo tiene una cuenta, recibirás un enlace para elegir otra contraseña. " +
             "Ábrelo en este teléfono y revisa también la carpeta de spam.") }
     }
     /** Called when the recovery email's link opens the app. */
     fun completePasswordRecovery(code: String) = perform(failure = LOAD_FAILED) {
-        repository.exchangeRecoveryCode(code)
-        _state.update { it.copy(signedIn = true, passwordRecovery = true) }
+        // Set before the session appears, so the app never shows the account behind the new-password page.
+        _state.update { it.copy(passwordRecovery = true) }
+        try { repository.exchangeRecoveryCode(code) }
+        catch (error: Exception) {
+            _state.update { it.copy(passwordRecovery = PendingPasswordRecovery.isPending(getApplication(), repository.auth.currentUserOrNull()?.id.orEmpty())) }
+            throw error
+        }
+        PendingPasswordRecovery.mark(getApplication(), repository.userId())
+        _state.update { it.copy(signedIn = true, passwordRecovery = true, recoveryEmailSent = null) }
         // The session listener's refresh is skipped while this action is running, so load here.
         load()
     }
@@ -174,9 +197,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun setRecoveredPassword(password: String, confirmation: String) = perform {
         require(password == confirmation) { "Las contraseñas no coinciden." }
         repository.setPassword(password)
+        PendingPasswordRecovery.clear(getApplication())
         _state.update { it.copy(passwordRecovery = false, notice = "Contraseña actualizada. Ya puedes usarla para entrar.") }
     }
-    override fun cancelPasswordRecovery() { _state.update { it.copy(passwordRecovery = false) } }
+    /** Leaving without a new password signs out: the link's session must not stand in for the password. */
+    override fun cancelPasswordRecovery() = logout()
     override fun login(username: String, password: String) = perform(failure = LOAD_FAILED) {
         require(com.example.findme.domain.model.Username.isValid(username) && password.isNotBlank()) { "Introduce un usuario válido y tu contraseña." }
         repository.signIn(username, password)
@@ -418,12 +443,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun register(name: String, email: String, username: String, password: String, confirmation: String) = perform {
         com.example.findme.domain.model.Registration.error(name, email, username, password, confirmation)?.let { throw IllegalArgumentException(it) }
         com.example.findme.data.repository.AuthorizedSignup.register(name, email, username, password)
-        _state.update { it.copy(confirmationEmail = email.trim()) }
+        _state.update { it.copy(confirmationEmail = email.trim(), confirmationSentAt = android.os.SystemClock.elapsedRealtime()) }
     }
     override fun resendConfirmation(email: String) = perform {
         require(com.example.findme.domain.model.Registration.isEmail(email)) { "Introduce un correo válido." }
         com.example.findme.data.repository.AuthorizedSignup.resend(email)
-        _state.update { it.copy(confirmationEmail = email.trim(), notice = "Solicitud enviada. Revisa tu correo y la carpeta de spam.") }
+        _state.update { it.copy(confirmationEmail = email.trim(), confirmationSentAt = android.os.SystemClock.elapsedRealtime(),
+            notice = "Solicitud enviada. Revisa tu correo y la carpeta de spam.") }
     }
     override fun finishRegistration() {
         _state.update { it.copy(confirmationEmail = null, error = null, notice = null, loginRevision = it.loginRevision + 1) }
@@ -439,7 +465,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         // While the session still exists, so the server accepts removing this device.
         com.example.findme.push.PushTokens.unregister()
         repository.auth.signOut()
-        _state.value = AccountState(initializing = false)
+        PendingPasswordRecovery.clear(getApplication())
+        _state.value = AccountState(initializing = false,
+            recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
         com.example.findme.widget.WidgetStore.clear(getApplication())
     }
     override fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {

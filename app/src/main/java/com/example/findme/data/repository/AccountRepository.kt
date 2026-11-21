@@ -195,7 +195,14 @@ class AccountRepository {
 
     /** Auth answers the same way for unknown addresses, so this does not reveal who has an account. */
     suspend fun requestPasswordReset(email: String) {
-        auth.resetPasswordForEmail(email.trim().lowercase(java.util.Locale.ROOT), redirectUrl = com.example.findme.domain.model.RecoveryLink.REDIRECT)
+        try {
+            auth.resetPasswordForEmail(email.trim().lowercase(java.util.Locale.ROOT), redirectUrl = com.example.findme.domain.model.RecoveryLink.REDIRECT)
+        } catch (error: io.github.jan.supabase.auth.exception.AuthRestException) {
+            val limited = error.errorCode == io.github.jan.supabase.auth.exception.AuthErrorCode.OverEmailSendRateLimit ||
+                error.errorCode == io.github.jan.supabase.auth.exception.AuthErrorCode.OverRequestRateLimit
+            if (!limited) throw error
+            throw IllegalArgumentException("Ya enviamos varios enlaces hace poco. Espera unos minutos, revisa la carpeta de spam e inténtalo de nuevo.")
+        }
     }
 
     suspend fun exchangeRecoveryCode(code: String) {
