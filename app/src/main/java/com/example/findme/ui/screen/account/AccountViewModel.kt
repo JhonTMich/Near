@@ -527,6 +527,41 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             publishWidgetSnapshot()
         }
     }
+    /**
+     * Saves the activities chosen from a calendar file. Those that clash with the schedule (or with each
+     * other) or are invalid are left out and counted, so one bad event does not block the rest.
+     */
+    override fun importSchedules(draftId: String, activities: List<ScheduleDto>) = perform {
+        require(activities.isNotEmpty()) { "Elige al menos una actividad." }
+        val ownerId = repository.userId()
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        val today = java.time.LocalDate.now(zone)
+        // Importing the same file again updates the same rows instead of clashing with them.
+        val current = _state.value.schedules.filterNot { row -> activities.any { it.id == row.id } }
+        val accepted = mutableListOf<ScheduleDto>()
+        var left = 0
+        activities.forEach { activity ->
+            val invalid = validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
+                ?: activity.oneOffDate?.let { com.example.findme.domain.model.validateOneOffDate(java.time.LocalDate.parse(it), today) }
+            if (invalid != null || findScheduleConflict(current + accepted, activity) != null) left++
+            else accepted += activity.copy(userId = ownerId)
+        }
+        if (accepted.isEmpty()) throw IllegalArgumentException("Ninguna actividad se pudo importar: todas coinciden con tu horario o no son válidas.")
+        scheduleSync.beginWrite()
+        try {
+            // Weekly and one-off rows go in separate requests, so every row of a request has the same fields.
+            val (once, weekly) = accepted.partition { it.isOneOff }
+            val rows = ((if (weekly.isNotEmpty()) repository.saveSchedules(weekly) else emptyList()) +
+                (if (once.isNotEmpty()) repository.saveSchedules(once) else emptyList())).withPauses(_state.value.pauses)
+            if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
+            val ids = rows.map { it.id }.toSet()
+            allSchedules = allSchedules.filterNot { it.id in ids } + rows
+            _state.update { old -> old.copy(schedules = old.schedules.filterNot { it.id in ids } + rows, savedScheduleDraftId = draftId,
+                notice = "Importadas ${rows.size} actividades" + if (left > 0) ". $left no se importaron porque coinciden con tu horario." else ".") }
+        } finally { scheduleSync.finishWrite() }
+        snapshotMutex.withLock { saveCurrentCache() }
+        publishWidgetSnapshot()
+    }
     override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) = perform {
         val ownerId = repository.userId()
         scheduleSync.beginWrite()

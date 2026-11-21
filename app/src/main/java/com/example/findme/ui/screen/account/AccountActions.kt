@@ -28,6 +28,7 @@ interface AccountActions {
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}
     fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) {}
     fun deleteSchedule(id: String) {}
+    fun importSchedules(draftId: String, activities: List<ScheduleDto>) {}
     /** [start] and [end] are inclusive "yyyy-MM-dd" dates in the owner's zone. */
     fun addPause(draftId: String, title: String, start: String, end: String) {}
     fun deletePause(id: String) {}

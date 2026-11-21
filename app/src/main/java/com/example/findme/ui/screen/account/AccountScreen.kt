@@ -715,6 +715,7 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         }
     }
     SchedulePausesPanel(state, today, onAdd = { pausing = true }, onDelete = { pendingPauseDelete = it })
+    CalendarImportPanel(state, actions, zone, today)
     oneOff?.let { (id, original) ->
         state.schedules.find { it.id == id }?.let { schedule ->
             ScheduleOccurrenceEditor(schedule, original, today, state, actions) { oneOff = null }
@@ -740,6 +741,90 @@ private fun SchedulePause.endLabel(): String = range()?.second?.format(shortDate
 private fun SchedulePause.rangeLabel(): String = range()?.let { (start, end) ->
     if (start == end) start.format(shortDate) else "${start.format(shortDate)} al ${end.format(shortDate)}"
 } ?: "$startDate al $endDate"
+
+/** Opens a calendar file (.ics) and lets the person choose what to add before anything is saved. */
+@Composable
+private fun CalendarImportPanel(state: AccountState, actions: AccountActions, zone: ZoneId, today: LocalDate) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var result by remember { mutableStateOf<com.example.findme.domain.model.IcsResult?>(null) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    val open = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        // Read at most one byte past the limit, so a huge file is rejected without loading it.
+                        val limit = com.example.findme.domain.model.IcsImport.MAX_BYTES
+                        val out = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        while (out.size() <= limit) {
+                            val read = input.read(buffer, 0, minOf(buffer.size, limit + 1 - out.size()))
+                            if (read < 0) break
+                            out.write(buffer, 0, read)
+                        }
+                        if (out.size() > limit) null else out.toString(Charsets.UTF_8.name())
+                    }
+                }.getOrNull()
+            }
+            if (text == null) { failed = "No se pudo leer el archivo. Elige un calendario .ics de menos de 1 MB."; return@launch }
+            val parsed = com.example.findme.domain.model.IcsImport.parse(text, zone, today)
+            if (parsed.candidates.isEmpty()) failed = "El archivo no tiene eventos con hora que Near pueda añadir."
+            else { failed = null; result = parsed }
+        }
+    }
+    Panel {
+        SectionHeading(Icons.Default.UploadFile, "Importar un calendario",
+            "Desde un archivo .ics de Google Calendar, Outlook o el portal de tu universidad.")
+        failed?.let { FormProblem(it) }
+        OutlinedButton(onClick = { open.launch(arrayOf("text/calendar", "text/x-vcalendar", "application/octet-stream", "text/plain")) },
+            enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Elegir archivo .ics")
+        }
+    }
+    result?.let { parsed -> CalendarImportSheet(parsed, state, actions) { result = null } }
+}
+
+@Composable
+private fun CalendarImportSheet(result: com.example.findme.domain.model.IcsResult, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var chosen by remember { mutableStateOf(result.candidates.map { it.uid }.toSet()) }
+    var category by rememberSaveable { mutableStateOf(ActivityCategory.UNIVERSITY.key) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Importar ${result.candidates.size} eventos",
+        if (result.skipped > 0) "${result.skipped} eventos no se pueden importar: de todo el día, ya pasados o con otras repeticiones." else null,
+        gesturesEnabled = false) {
+        ScheduleChoice("Tipo de actividad", ActivityCategory.entries, ActivityCategory.fromKey(category), { category = it.key },
+            leading = ActivityCategory.fromKey(category).icon) { it.label }
+        result.candidates.forEach { event ->
+            val checked = event.uid in chosen
+            Row(Modifier.fillMaxWidth().toggleable(checked, role = Role.Checkbox) { chosen = if (it) chosen + event.uid else chosen - event.uid },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Checkbox(checked, onCheckedChange = null)
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val whenText = if (event.weekly) event.days.joinToString(", ") { days[it - 1].take(3) } + " · cada semana"
+                        else event.date!!.longDate()
+                    Text("$whenText · ${formatScheduleTime(event.start)}–${formatScheduleTime(event.end)}",
+                        color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Text("Las que coincidan con tu horario se omitirán. Si importas el mismo archivo otra vez, se actualizan en lugar de duplicarse.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        state.error?.takeIf { submitted }?.let { FormProblem(it) }
+        val selected = result.candidates.filter { it.uid in chosen }
+        Button(onClick = { submitted = true; actions.importSchedules(draftId, selected.flatMap { it.toSchedules(category) }) },
+            enabled = !state.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.busy) "Importando…" else "Importar ${selected.size} ${if (selected.size == 1) "evento" else "eventos"}")
+        }
+    }
+}
 
 /** Upcoming pauses, with the way to add one. Past pauses are not shown. */
 @Composable
