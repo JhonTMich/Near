@@ -73,7 +73,9 @@ data class AccountState(
     /** Own pauses and those of people who share their schedule. Already applied to the schedules above. */
     val pauses: List<SchedulePause> = emptyList(),
     /** People this account asked to be told about when they are free. */
-    val freeAlerts: List<FreeAlert> = emptyList()
+    val freeAlerts: List<FreeAlert> = emptyList(),
+    /** Plans sent or received by this account. */
+    val plans: List<PlanProposal> = emptyList()
 ) {
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
@@ -162,6 +164,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM002" -> "Demasiados intentos seguidos. Espera unos minutos e inténtalo de nuevo."
                     "FM004" -> "La fecha o las horas de esta actividad no son válidas. Revisa la ocurrencia."
                     "FM003" -> "La zona horaria del teléfono no es válida. Revisa la configuración de fecha y hora."
+                    "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
@@ -242,6 +245,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             // Not part of a complete sync: a server without the pauses table still syncs everything else.
             val pausesRequest = async { readSection("schedule pauses", repository::pauses) }
             val freeAlertsRequest = async { readSection("free alerts", repository::freeAlerts) }
+            val plansRequest = async { readSection("plans", repository::plans) }
             val remoteProfile = profileRequest.await()
             val remoteConnections = connectionsRequest.await()
             val remoteProfiles = profilesRequest.await()
@@ -253,6 +257,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remoteVisibility = visibilityRequest.await()
             val remotePauses = pausesRequest.await()
             val remoteFreeAlerts = freeAlertsRequest.await()
+            val remotePlans = plansRequest.await()
             if (repository.auth.currentUserOrNull()?.id != id) return@coroutineScope
 
             val old = _state.value
@@ -294,7 +299,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 schedules = ownSchedules, statuses = statuses.filter { it.userId == id },
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
                 preferences = preferences, pauses = pauses, selectedPerson = selected,
-                freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds }, personSchedules = schedules.filter { it.userId == selected?.id },
+                freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds },
+                plans = (remotePlans ?: previous?.plans.orEmpty()).filter { it.senderId in peopleIds || it.recipientId in peopleIds }, personSchedules = schedules.filter { it.userId == selected?.id },
                 personStatuses = statuses.filter { it.userId == selected?.id }, lastSync = syncedAt, syncIssue = !complete,
                 incomingVisibility = remoteVisibility.orEmpty().filter { it.personId in peopleIds }.associateBy { it.personId },
                 peopleSchedulesFresh = remoteSchedules != null, peopleStatusesFresh = remoteStatuses != null) }
@@ -566,6 +572,26 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun cancelFreeAlert(personId: String) = perform {
         repository.removeFreeAlert(personId)
         _state.update { old -> old.copy(freeAlerts = old.freeAlerts.filterNot { it.targetId == personId }, notice = "Aviso cancelado.") }
+    }
+
+    override fun proposePlan(draftId: String, personId: String, title: String, location: String, start: Instant, end: Instant) = perform {
+        com.example.findme.domain.model.Plans.validate(title, start, end, Instant.now())?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val plan = repository.proposePlan(personId, title, location, start, end)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        val name = _state.value.profiles.find { it.id == personId }?.let(_state.value.controls::nameOf) ?: "esa persona"
+        _state.update { old -> old.copy(plans = old.plans + plan, savedScheduleDraftId = draftId,
+            notice = "Propuesta enviada a $name. Te avisaremos cuando responda.") }
+    }
+    override fun answerPlan(id: String, accept: Boolean) = perform {
+        val plan = repository.answerPlan(id, accept)
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }) }
+        // Accepting added the activity to the schedule; load it.
+        refreshAfterSave(if (accept) "Plan aceptado. Ya está en tu horario." else "Respuesta enviada.")
+    }
+    override fun cancelPlan(id: String) = perform {
+        val plan = repository.cancelPlan(id)
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
     }
 
     /** Applies the new pauses to every loaded schedule, then saves the cache and refreshes the widget and reminders. */

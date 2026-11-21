@@ -2,6 +2,7 @@ package com.example.findme.push
 
 import com.example.findme.data.local.AccountAlert
 import com.example.findme.data.local.AccountSettings
+import com.example.findme.domain.model.Plans
 import com.example.findme.util.NotificationHelper
 
 /** What one push (FCM data message sent by the send-push function) shows, before the switches are checked. */
@@ -14,6 +15,7 @@ object PushAlerts {
     const val STATUS_ENDED = "Vuelve a mostrar su horario."
     const val NOW_FREE = "Ya está libre. Es un buen momento para escribirle."
     fun freeId(personId: String) = "free:$personId".hashCode()
+    fun planId(planId: String) = "plan:$planId".hashCode()
 
     fun statusText(location: String, message: String?) =
         listOfNotNull(location.trim(), message?.trim()?.takeIf { it.isNotEmpty() }).joinToString(" · ")
@@ -47,6 +49,23 @@ object PushAlerts {
             }
             "free" -> PushAlert(AccountAlert.Activities, NotificationHelper.Channel.Requested,
                 freeId(person ?: return null), name, NOW_FREE, person, requested = true)
+            "plan" -> {
+                val id = data["id"] ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                val time = Plans.whenText(data["starts_at"] ?: return null, data["ends_at"], java.time.ZoneId.systemDefault())
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Messages, planId(id), "$name te propone un plan",
+                    "$title · $time", person ?: return null)
+            }
+            "plan_answer" -> {
+                val id = data["id"] ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                val time = Plans.whenText(data["starts_at"] ?: return null, null, java.time.ZoneId.systemDefault())
+                val accepted = data["accepted"] == "true"
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Requested, planId(id),
+                    if (accepted) "$name aceptó tu plan" else "$name no puede",
+                    if (accepted) "$title · $time. Ya está en el horario de ambos." else "$title · $time", person ?: return null,
+                    requested = true)
+            }
             else -> null
         }
     }

@@ -33,6 +33,9 @@ interface AccountActions {
     fun deletePause(id: String) {}
     fun notifyWhenFree(personId: String) {}
     fun cancelFreeAlert(personId: String) {}
+    fun proposePlan(draftId: String, personId: String, title: String, location: String, start: java.time.Instant, end: java.time.Instant) {}
+    fun answerPlan(id: String, accept: Boolean) {}
+    fun cancelPlan(id: String) {}
     fun setStatus(text: String, minutes: Long) {}
     fun clearStatus() {}
     fun invite() {}

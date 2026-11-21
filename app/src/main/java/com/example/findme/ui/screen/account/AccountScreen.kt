@@ -79,6 +79,8 @@ import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
 import com.example.findme.domain.model.commonFreeTime
+import com.example.findme.domain.model.FreeSlot
+import com.example.findme.domain.model.Plans
 import com.example.findme.domain.model.covering
 import com.example.findme.domain.model.range
 import com.example.findme.domain.model.validatePause
@@ -1047,7 +1049,7 @@ private fun TimeField(value: String, change: (String) -> Unit, label: String) {
 }
 
 @Composable
-private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActions, dismiss: () -> Unit) {
+private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActions, onPropose: (FreeSlot) -> Unit, dismiss: () -> Unit) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var schedules by remember { mutableStateOf<SharedSchedules?>(null) }
     var error by remember { mutableStateOf(false) }
@@ -1086,7 +1088,8 @@ private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActi
             }
             pair == null -> Text("Ambas personas deben compartir su horario en esta conexión.", color = TextSecondary)
             else -> {
-                Text("Próximos 7 días. Huecos de 30 minutos o más, en tu zona horaria. Se calculan a partir de sus actividades programadas.",
+                Text("Próximos 7 días. Huecos de 30 minutos o más, en tu zona horaria. Se calculan a partir de sus actividades programadas. " +
+                    "Toca un hueco para proponer un plan.",
                     color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 Choices(listOf(false, true), allHours, { allHours = it }) { if (it) "Todo el día" else "8:00–22:00" }
                 val freeDays = remember(pair, allHours, asOf) { commonFreeTime(pair, asOf, allHours) }
@@ -1103,7 +1106,10 @@ private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActi
                             else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 day.slots.forEach { slot ->
                                     val end = if (slot.end.toLocalDate() > day.date) "24:00" else slot.end.format(hourFormat)
-                                    StatusPill("${slot.start.format(hourFormat)} – $end", BrandSky)
+                                    SuggestionChip(onClick = { onPropose(slot) }, label = { Text("${slot.start.format(hourFormat)} – $end") },
+                                        icon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+                                        colors = SuggestionChipDefaults.suggestionChipColors(labelColor = BrandSky, iconContentColor = BrandSky),
+                                        border = BorderStroke(1.dp, BrandSky.copy(alpha = .45f)))
                                 }
                             }
                         }
@@ -1148,6 +1154,7 @@ private fun People(state: AccountState, actions: AccountActions) {
                 state.busy, actions)
         }
     }
+    PlansPanel(state, actions)
     state.selectedPerson?.let { selected ->
         val person = selected.copy(displayName = controls.nameOf(selected))
         val visibility = state.incomingVisibility[person.id]
@@ -1183,7 +1190,10 @@ private fun People(state: AccountState, actions: AccountActions) {
                 }
                 TextButton(onClick = { manageMessages = true }) { Text("Mis mensajes") }
             }
-            if (showAvailability) CommonAvailabilitySheet(person, actions) { showAvailability = false }
+            var proposing by remember { mutableStateOf<FreeSlot?>(null) }
+            if (showAvailability) CommonAvailabilitySheet(person, actions,
+                onPropose = { proposing = it; showAvailability = false }) { showAvailability = false }
+            proposing?.let { slot -> PlanSheet(person, slot, state, actions) { proposing = null } }
             if (sendMessage) Sheet({ sendMessage = false }, "Mensaje para ${person.displayName}", "Los mensajes caducan después de 24 horas.") {
                 if (state.messages.isEmpty()) Text("Crea un mensaje rápido para enviarlo desde aquí.", color = TextSecondary)
                 state.messages.forEach { quick ->
@@ -1236,6 +1246,90 @@ private fun People(state: AccountState, actions: AccountActions) {
     }
     disconnect?.let { connection -> Confirm("¿Desvincular persona?", "Ambos dejarán de ver el horario y estado del otro.",
         { disconnect = null }, { actions.disconnect(connection.id); disconnect = null }) }
+}
+
+/** Upcoming plans with connected people: answer the ones received, follow or cancel the ones sent. */
+@Composable
+private fun PlansPanel(state: AccountState, actions: AccountActions) {
+    val own = state.profile?.id ?: return
+    val now = Instant.now()
+    val plans = Plans.upcoming(state.plans, now).filter { it.status != "cancelled" }
+    if (plans.isEmpty()) return
+    val zone = ZoneId.systemDefault()
+    fun name(id: String) = state.profiles.find { it.id == id }?.let(state.controls::nameOf) ?: "Tu gente"
+    Panel {
+        SectionHeading(Icons.Default.Event, "Planes", "Propuestas desde las horas libres en común")
+        plans.forEach { plan ->
+            val received = plan.recipientId == own
+            val other = name(if (received) plan.senderId else plan.recipientId)
+            Surface(shape = RoundedCornerShape(16.dp), color = CardBg, border = BorderStroke(1.dp, CardBorder)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(plan.title, fontWeight = FontWeight.Bold)
+                    Text(Plans.whenText(plan.startsAt, plan.endsAt, zone).replaceFirstChar(Char::titlecase),
+                        color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    if (plan.location.isNotBlank()) Text(plan.location, color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    when {
+                        plan.status == "pending" && received -> {
+                            Text("$other te lo propone", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { actions.answerPlan(plan.id, true) }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Aceptar") }
+                                OutlinedButton(onClick = { actions.answerPlan(plan.id, false) }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("No puedo") }
+                            }
+                        }
+                        plan.status == "pending" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Esperando respuesta de $other", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { actions.cancelPlan(plan.id) }, enabled = !state.busy) { Text("Cancelar") }
+                        }
+                        plan.status == "accepted" -> StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                        else -> StatusPill(if (received) "Lo rechazaste" else "$other no puede", TextMuted)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanSheet(person: AccountProfile, slot: FreeSlot, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var title by rememberSaveable { mutableStateOf(Plans.TITLES.first()) }
+    var location by rememberSaveable { mutableStateOf("") }
+    // Starts every 30 minutes inside the free slot, leaving at least 30 minutes before it ends.
+    val firstStart = slot.start.truncatedTo(java.time.temporal.ChronoUnit.MINUTES).let { start ->
+        val extra = (30 - start.minute % 30) % 30
+        start.plusMinutes(extra.toLong()).takeIf { !it.plusMinutes(30).isAfter(slot.end) } ?: start
+    }
+    val starts = generateSequence(firstStart) { it.plusMinutes(30) }.takeWhile { !it.plusMinutes(30).isAfter(slot.end) }.take(48).toList()
+        .ifEmpty { listOf(slot.start) }
+    var startIndex by rememberSaveable { mutableIntStateOf(0) }
+    val start = starts[startIndex.coerceIn(starts.indices)]
+    val durations = Plans.DURATIONS.filter { !start.plusMinutes(it).isAfter(slot.end) }.ifEmpty { listOf(30L) }
+    var minutes by rememberSaveable { mutableLongStateOf(60L) }
+    val duration = if (minutes in durations) minutes else durations.last()
+    val end = start.plusMinutes(duration)
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    val problem = Plans.validate(title, start.toInstant(), end.toInstant(), Instant.now())
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Proponer un plan a ${person.displayName}", "Si acepta, se añadirá al horario de ambos.") {
+        Choices(Plans.TITLES, title, { title = it }) { it }
+        Field(title, { title = it.take(120) }, "¿Qué quieres proponer?")
+        Text(start.toLocalDate().longDate().replaceFirstChar(Char::titlecase), style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScheduleChoice("Empieza", starts.indices.toList(), startIndex.coerceIn(starts.indices), { startIndex = it },
+                Modifier.weight(1f), leading = Icons.Default.Schedule) { starts[it].format(hourFormat) }
+            ScheduleChoice("Dura", durations, duration, { minutes = it }, Modifier.weight(1f)) {
+                if (it < 60) "$it min" else if (it % 60 == 0L) "${it / 60} h" else "${it / 60} h ${it % 60} min"
+            }
+        }
+        Field(location, { location = it.take(160) }, "Lugar (opcional)")
+        (problem ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.proposePlan(draftId, person.id, title, location, start.toInstant(), end.toInstant()) },
+            enabled = !state.busy && problem == null, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Enviar propuesta")
+        }
+    }
 }
 
 @Composable

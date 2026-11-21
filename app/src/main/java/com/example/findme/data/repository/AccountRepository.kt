@@ -140,6 +140,26 @@ class AccountRepository {
         client.postgrest["free_alerts"].delete { filter { eq("watcher_id", userId()); eq("target_id", targetId) } }
     }
 
+    /** Plans this account sent or received; RLS returns only those. */
+    suspend fun plans() = client.postgrest["plan_proposals"].select().decodeList<PlanProposal>()
+
+    suspend fun proposePlan(recipientId: String, title: String, location: String, start: Instant, end: Instant): PlanProposal =
+        client.postgrest["plan_proposals"].insert(buildJsonObject {
+            put("id", UUID.randomUUID().toString())
+            put("sender_id", userId())
+            put("recipient_id", recipientId)
+            put("title", title.trim())
+            put("location", location.trim())
+            put("starts_at", start.toString())
+            put("ends_at", end.toString())
+        }) { select() }.decodeSingle<PlanProposal>()
+
+    suspend fun answerPlan(id: String, accept: Boolean): PlanProposal =
+        client.postgrest.rpc("answer_plan", buildJsonObject { put("plan_id", id); put("accept", accept) }).decodeSingle<PlanProposal>()
+
+    suspend fun cancelPlan(id: String): PlanProposal =
+        client.postgrest.rpc("cancel_plan", buildJsonObject { put("plan_id", id) }).decodeSingle<PlanProposal>()
+
     suspend fun deleteSchedule(id: String) {
         client.postgrest["personal_schedule"].delete { filter { eq("id", id); eq("user_id", userId()) } }
     }
