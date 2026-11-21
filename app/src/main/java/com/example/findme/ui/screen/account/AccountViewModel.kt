@@ -71,7 +71,9 @@ data class AccountState(
     val invitation: ConnectionInvitation? = null,
     val preferences: List<ConnectionPreference> = emptyList(),
     /** Own pauses and those of people who share their schedule. Already applied to the schedules above. */
-    val pauses: List<SchedulePause> = emptyList()
+    val pauses: List<SchedulePause> = emptyList(),
+    /** People this account asked to be told about when they are free. */
+    val freeAlerts: List<FreeAlert> = emptyList()
 ) {
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
@@ -239,6 +241,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val preferencesRequest = async { readSection("connection preferences", repository::connectionPreferences) }
             // Not part of a complete sync: a server without the pauses table still syncs everything else.
             val pausesRequest = async { readSection("schedule pauses", repository::pauses) }
+            val freeAlertsRequest = async { readSection("free alerts", repository::freeAlerts) }
             val remoteProfile = profileRequest.await()
             val remoteConnections = connectionsRequest.await()
             val remoteProfiles = profilesRequest.await()
@@ -249,6 +252,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remotePreferences = preferencesRequest.await()
             val remoteVisibility = visibilityRequest.await()
             val remotePauses = pausesRequest.await()
+            val remoteFreeAlerts = freeAlertsRequest.await()
             if (repository.auth.currentUserOrNull()?.id != id) return@coroutineScope
 
             val old = _state.value
@@ -289,7 +293,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(signedIn = true, profile = profile,
                 schedules = ownSchedules, statuses = statuses.filter { it.userId == id },
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
-                preferences = preferences, pauses = pauses, selectedPerson = selected, personSchedules = schedules.filter { it.userId == selected?.id },
+                preferences = preferences, pauses = pauses, selectedPerson = selected,
+                freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds }, personSchedules = schedules.filter { it.userId == selected?.id },
                 personStatuses = statuses.filter { it.userId == selected?.id }, lastSync = syncedAt, syncIssue = !complete,
                 incomingVisibility = remoteVisibility.orEmpty().filter { it.personId in peopleIds }.associateBy { it.personId },
                 peopleSchedulesFresh = remoteSchedules != null, peopleStatusesFresh = remoteStatuses != null) }
@@ -551,6 +556,18 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         replacePauses(_state.value.pauses.filterNot { it.id == id })
         _state.update { it.copy(notice = "Pausa eliminada. Tu horario vuelve a aplicarse esas fechas.") }
     }
+    override fun notifyWhenFree(personId: String) = perform {
+        repository.addFreeAlert(personId)
+        val name = _state.value.profiles.find { it.id == personId }?.let(_state.value.controls::nameOf) ?: "esa persona"
+        _state.update { old -> old.copy(freeAlerts = old.freeAlerts.filterNot { it.targetId == personId } +
+            FreeAlert(repository.userId(), personId, Instant.now().plusSeconds(86400).toString()),
+            notice = "Te avisaremos cuando $name quede libre, durante las próximas 24 horas.") }
+    }
+    override fun cancelFreeAlert(personId: String) = perform {
+        repository.removeFreeAlert(personId)
+        _state.update { old -> old.copy(freeAlerts = old.freeAlerts.filterNot { it.targetId == personId }, notice = "Aviso cancelado.") }
+    }
+
     /** Applies the new pauses to every loaded schedule, then saves the cache and refreshes the widget and reminders. */
     private suspend fun replacePauses(pauses: List<SchedulePause>) {
         allSchedules = allSchedules.withPauses(pauses)

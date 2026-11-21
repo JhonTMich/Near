@@ -1,7 +1,7 @@
 const reply = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
 });
-const TYPES = new Set(['message', 'status', 'status_end', 'activity']);
+const TYPES = new Set(['message', 'status', 'status_end', 'activity', 'free']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 

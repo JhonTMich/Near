@@ -18,7 +18,8 @@ object NotificationHelper {
         Activities("near_activities", "Actividades de tu gente", "Cuando una persona conectada comienza una actividad."),
         Statuses("findme_status_channel", "Estados de tu gente", "Cuando tu gente comparte, cambia o quita su estado."),
         Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos que recibes."),
-        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario.")
+        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario."),
+        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a un plan que propusiste.")
     }
 
     fun createNotificationChannel(context: Context) {

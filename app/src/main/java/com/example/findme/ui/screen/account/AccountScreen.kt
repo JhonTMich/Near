@@ -1154,7 +1154,11 @@ private fun People(state: AccountState, actions: AccountActions) {
         key(person.id) {
             var showAvailability by rememberSaveable { mutableStateOf(false) }
             var sendMessage by rememberSaveable { mutableStateOf(false) }
-            HeroStatusCard(contactStatus(person, state)) {
+            val current = contactStatus(person, state)
+            val busy = current is UserCurrentStatus.InClass ||
+                (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
+            val watching = state.freeAlerts.any { it.targetId == person.id }
+            HeroStatusCard(current) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -1164,6 +1168,18 @@ private fun People(state: AccountState, actions: AccountActions) {
                     Icon(Icons.Default.EventAvailable, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Ver horas libres en común")
+                }
+                // Only useful while the person is busy; the server sends one push when that ends.
+                if (visibility?.sharesSchedule != false && watching) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.NotificationsActive, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Te avisaremos cuando quede libre", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { actions.cancelFreeAlert(person.id) }, enabled = !state.busy) { Text("Cancelar") }
+                } else if (visibility?.sharesSchedule != false && busy) OutlinedButton(onClick = { actions.notifyWhenFree(person.id) },
+                    enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.NotificationsActive, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Avísame cuando esté libre")
                 }
                 TextButton(onClick = { manageMessages = true }) { Text("Mis mensajes") }
             }

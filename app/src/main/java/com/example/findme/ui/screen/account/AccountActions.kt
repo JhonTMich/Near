@@ -31,6 +31,8 @@ interface AccountActions {
     /** [start] and [end] are inclusive "yyyy-MM-dd" dates in the owner's zone. */
     fun addPause(draftId: String, title: String, start: String, end: String) {}
     fun deletePause(id: String) {}
+    fun notifyWhenFree(personId: String) {}
+    fun cancelFreeAlert(personId: String) {}
     fun setStatus(text: String, minutes: Long) {}
     fun clearStatus() {}
     fun invite() {}

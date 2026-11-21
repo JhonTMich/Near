@@ -127,6 +127,19 @@ class AccountRepository {
         client.postgrest["schedule_pauses"].delete { filter { eq("id", id); eq("user_id", userId()) } }
     }
 
+    suspend fun freeAlerts() = client.postgrest["free_alerts"].select().decodeList<FreeAlert>()
+
+    suspend fun addFreeAlert(targetId: String) {
+        client.postgrest["free_alerts"].upsert(buildJsonObject {
+            put("watcher_id", userId())
+            put("target_id", targetId)
+        }) { onConflict = "watcher_id,target_id"; ignoreDuplicates = true }
+    }
+
+    suspend fun removeFreeAlert(targetId: String) {
+        client.postgrest["free_alerts"].delete { filter { eq("watcher_id", userId()); eq("target_id", targetId) } }
+    }
+
     suspend fun deleteSchedule(id: String) {
         client.postgrest["personal_schedule"].delete { filter { eq("id", id); eq("user_id", userId()) } }
     }

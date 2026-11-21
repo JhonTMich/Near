@@ -77,6 +77,7 @@ jobs:
           node scripts/test_schedule_occurrences.mjs
           node scripts/test_schedule_pauses.mjs
           node scripts/test_one_off_activities.mjs
+          node scripts/test_free_alerts.mjs
       - name: Build release and run Android checks
         env:
           NEAR_FIREBASE_CONFIG: ${{ (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && secrets.NEAR_FIREBASE_CONFIG || '' }}

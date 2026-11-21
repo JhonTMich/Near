@@ -48,8 +48,9 @@ class NearMessagingService : FirebaseMessagingService() {
         }
 
         suspend fun show(context: Context, data: Map<String, String>) {
-            if (accountScreenVisible) return
             val alert = PushAlerts.from(data) ?: return
+            // With Near open the app announces changes itself; a requested alert has no local equivalent.
+            if (accountScreenVisible && !alert.requested) return
             val auth = SupabaseClientProvider.client.auth
             auth.awaitInitialization()
             val owner = auth.currentUserOrNull()?.id ?: return
