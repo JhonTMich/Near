@@ -16,7 +16,9 @@ import com.example.findme.data.local.AppTheme
 import com.example.findme.ui.screen.UpdateState
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.border
@@ -47,7 +49,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,6 +73,7 @@ import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
 import com.example.findme.domain.model.formatScheduleTime
 import com.example.findme.domain.model.validateSchedule
+import com.example.findme.domain.model.shiftScheduleEnd
 import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
@@ -97,6 +104,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.GenericShape
 
 private val days = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+private val dayLetters = listOf("L", "M", "X", "J", "V", "S", "D")
 private val hourFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
 private fun AccountProfile.zone() = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.systemDefault())
 
@@ -680,28 +688,38 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             title = title.trim(), location = location.trim(), category = category, modality = modality,
             endsNextDay = endsNextDay)
     }
-    val invalid = selectedDays.firstOrNull()?.let { validateSchedule(it, start, end, title, endsNextDay) }
-    val conflict = if (invalid == null) {
-        activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }
-    } else null
-    val timeError = validateSchedule(1, start, end, "Actividad", endsNextDay)
+    // Problems are only reported after a save attempt, so editing never flashes errors mid-way.
+    val problem = if (selectedDays.isEmpty()) "Elige al menos un día."
+        else validateSchedule(selectedDays.first(), start, end, title, endsNextDay)
+            ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
+    var showProblem by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality) { showProblem = false }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
         if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
     }
     Sheet(dismiss, if (editingId == null) "Nueva actividad" else "Editar serie semanal", gesturesEnabled = false) {
         Field(title, { title = it.take(120) }, "Título", placeholder = "Ej. Clase de inglés")
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (editingId == null) {
-                ScheduleDays(selectedDays, { selectedDays = it }, Modifier.weight(1f))
-            } else {
-                ScheduleChoice("Día", (1..7).toList(), selectedDays.single(),
-                    { selectedDays = listOf(it) }, Modifier.weight(1f)) { days[it - 1] }
-            }
-            ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
-                { category = it.key }, Modifier.weight(1f), leading = ActivityCategory.fromKey(category).icon) { it.label }
+        if (editingId == null) {
+            ScheduleDays(selectedDays, { selectedDays = it })
+        } else {
+            ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) { TimeField(start, { start = it }, "Inicio") }
+            ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
+                { category = it.key }, Modifier.weight(1f), leading = ActivityCategory.fromKey(category).icon) { it.label }
+            ScheduleChoice("Modalidad", listOf("presencial", "virtual"), modality, { modality = it }, Modifier.weight(1f),
+                leading = if (modality == "virtual") Icons.Default.Videocam else Icons.Default.LocationOn) {
+                it.replaceFirstChar(Char::titlecase)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) { TimeField(start, { newStart ->
+                // Keep the activity's length so changing the start rarely needs a second edit.
+                shiftScheduleEnd(start, end, endsNextDay, newStart)?.let { (newEnd, nextDay) ->
+                    end = newEnd; endsNextDay = nextDay
+                }
+                start = newStart
+            }, "Inicio") }
             Box(Modifier.weight(1f)) { TimeField(end, { end = it }, "Fin") }
         }
         Row(
@@ -714,48 +732,47 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             Text("Termina al día siguiente", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             Switch(checked = endsNextDay, onCheckedChange = null, colors = nearSwitchColors())
         }
-        ScheduleChoice("Modalidad", listOf("presencial", "virtual"), modality, { modality = it },
-            leading = if (modality == "virtual") Icons.Default.Videocam else Icons.Default.LocationOn) {
-            it.replaceFirstChar(Char::titlecase)
-        }
-        val feedback = if (selectedDays.isEmpty()) "Elige al menos un día."
-            else conflict?.conflictMessage() ?: timeError ?: if (submitted) invalid ?: state.error else null
-        feedback?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         Field(location, { location = it.take(160) }, "Lugar o aula (opcional)")
+        val feedback = problem?.takeIf { showProblem } ?: state.error?.takeIf { submitted }
+        feedback?.let { FormProblem(it) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = dismiss) { Text("Cancelar") }
             Button(onClick = {
-                submitted = true
-                if (invalid == null) actions.saveSchedules(draftId, activities)
-            }, enabled = !state.busy && selectedDays.isNotEmpty() && conflict == null,
-                modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
+                if (problem != null) {
+                    showProblem = true
+                } else {
+                    submitted = true
+                    actions.saveSchedules(draftId, activities)
+                }
+            }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
         }
     }
 }
 
+/** One tap per day: all seven days stay visible instead of hiding behind a menu. */
 @Composable
-private fun ScheduleDays(chosen: List<Int>, onSelect: (List<Int>) -> Unit, modifier: Modifier = Modifier) {
-    val summary = when (chosen.size) {
-        0 -> "Elegir días"
-        1 -> days[chosen.single() - 1]
-        in 2..3 -> chosen.joinToString(", ") { days[it - 1].take(3) }
-        7 -> "Todos los días"
-        else -> "${chosen.size} días"
-    }
-    SelectMenuField("Días", summary, modifier) { close ->
-        days.forEachIndexed { index, name ->
-            val day = index + 1
-            val checked = day in chosen
-            SelectMenuItem(name, checked, showCheck = false,
-                leading = { Checkbox(checked = checked, onCheckedChange = null,
-                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary,
-                        uncheckedColor = TextMuted, checkmarkColor = MaterialTheme.colorScheme.onPrimary)) },
-                onClick = { onSelect(if (checked) chosen - day else (chosen + day).sorted()) })
+private fun ScheduleDays(chosen: List<Int>, onSelect: (List<Int>) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Días", color = TextSecondary, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            days.forEachIndexed { index, name ->
+                val day = index + 1
+                val checked = day in chosen
+                val primary = MaterialTheme.colorScheme.primary
+                Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (checked) primary else Color.Transparent)
+                    .border(1.dp, if (checked) primary else CardBorder, RoundedCornerShape(12.dp))
+                    .selectable(checked, role = Role.Checkbox) {
+                        onSelect(if (checked) chosen - day else (chosen + day).sorted())
+                    }
+                    .semantics { contentDescription = name },
+                    contentAlignment = Alignment.Center) {
+                    Text(dayLetters[index], fontWeight = FontWeight.SemiBold,
+                        color = if (checked) MaterialTheme.colorScheme.onPrimary else TextSecondary)
+                }
+            }
         }
-        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = CardBorder)
-        DropdownMenuItem(text = { Text("Listo", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, onClick = close)
     }
 }
 
@@ -773,6 +790,19 @@ private fun <T> ScheduleChoice(
         choices.forEach { choice ->
             SelectMenuItem(name(choice), choice == selected, onClick = { onSelect(choice); close() })
         }
+    }
+}
+
+/** A single, calm notice shown next to the save action instead of live red text. */
+@Composable
+private fun FormProblem(message: String) {
+    val error = MaterialTheme.colorScheme.error
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(error.copy(alpha = .08f))
+        .semantics { liveRegion = LiveRegionMode.Polite }
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = error)
+        Text(message, color = error, style = MaterialTheme.typography.bodySmall)
     }
 }
 
