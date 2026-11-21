@@ -75,7 +75,9 @@ data class AccountState(
     /** People this account asked to be told about when they are free. */
     val freeAlerts: List<FreeAlert> = emptyList(),
     /** Plans sent or received by this account. */
-    val plans: List<PlanProposal> = emptyList()
+    val plans: List<PlanProposal> = emptyList(),
+    /** Places saved on this phone for the automatic status; they are never sent anywhere. */
+    val autoPlaces: List<com.example.findme.places.AutoPlace> = emptyList()
 ) {
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
@@ -110,6 +112,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 if (it is io.github.jan.supabase.auth.status.SessionStatus.Initializing) return@collect
                 if (user == null) {
                     PendingPasswordRecovery.clear(getApplication())
+                    launch { runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), null) } }
                     // Keep the resend countdowns: signing out does not let the server send sooner.
                     _state.value = AccountState(initializing = false,
                         recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
@@ -123,6 +126,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                         passwordRecovery = old.passwordRecovery || recovering) }
                     // This device receives this account's pushes from now on.
                     launch { com.example.findme.push.PushTokens.register() }
+                    launch { loadAutoPlaces(user.id) }
                     // Show the last successful sync at once, then refresh it from the network.
                     restoreCache(user.id)
                     refresh()
@@ -483,6 +487,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun logout() = perform {
         // While the session still exists, so the server accepts removing this device.
         com.example.findme.push.PushTokens.unregister()
+        forgetAutoPlaces()
         repository.auth.signOut()
         PendingPasswordRecovery.clear(getApplication())
         _state.value = AccountState(initializing = false,
@@ -595,6 +600,39 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
     }
 
+    private suspend fun loadAutoPlaces(owner: String) {
+        val places = runCatching { com.example.findme.places.AutoPlaces.places(getApplication(), owner) }.getOrDefault(emptyList())
+        if (repository.auth.currentUserOrNull()?.id == owner) _state.update { it.copy(autoPlaces = places) }
+        runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+    }
+    /** Saved places are home addresses and the like: they do not outlive the session on this phone. */
+    private suspend fun forgetAutoPlaces(owner: String? = repository.auth.currentUserOrNull()?.id) {
+        owner ?: return
+        runCatching {
+            com.example.findme.places.AutoPlaces.places(getApplication(), owner).forEach {
+                com.example.findme.places.AutoPlaces.remove(getApplication(), owner, it.id)
+            }
+            com.example.findme.places.AutoPlaces.register(getApplication(), null)
+        }
+    }
+    override fun addAutoPlace(label: String) = perform {
+        com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val location = com.example.findme.places.AutoPlaces.currentLocation(getApplication())
+            ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, location)
+        _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+    }
+    override fun removeAutoPlace(id: String) = perform {
+        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
+        _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
+    }
+    /** After the location permission changes, so the geofences match what Android now allows. */
+    override fun refreshAutoPlaces() {
+        val owner = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { loadAutoPlaces(owner) }
+    }
+
     /** Applies the new pauses to every loaded schedule, then saves the cache and refreshes the widget and reminders. */
     private suspend fun replacePauses(pauses: List<SchedulePause>) {
         allSchedules = allSchedules.withPauses(pauses)
@@ -621,10 +659,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
     override fun setStatus(text: String, minutes: Long) = perform {
         repository.setStatus(text, minutes)
+        // A status chosen by hand is not removed when leaving a saved place.
+        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Estado actualizado.")
     }
     override fun clearStatus() = perform {
         repository.clearStatus()
+        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Se muestra tu horario de nuevo.")
     }
     override fun invite() = perform {
@@ -701,7 +742,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(notice = "Contraseña actualizada.") }
     }
     override fun deleteAccount(password: String) = perform {
+        val owner = repository.userId()
         repository.deleteAccount(password)
+        forgetAutoPlaces(owner)
         _state.value = AccountState(initializing = false, notice = "Tu cuenta y tus datos se eliminaron.")
         com.example.findme.widget.WidgetStore.clear(getApplication())
     }

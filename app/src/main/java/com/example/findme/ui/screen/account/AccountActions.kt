@@ -36,6 +36,10 @@ interface AccountActions {
     fun proposePlan(draftId: String, personId: String, title: String, location: String, start: java.time.Instant, end: java.time.Instant) {}
     fun answerPlan(id: String, accept: Boolean) {}
     fun cancelPlan(id: String) {}
+    /** Saves the phone's current location as a place that shares [label] on arrival. */
+    fun addAutoPlace(label: String) {}
+    fun removeAutoPlace(id: String) {}
+    fun refreshAutoPlaces() {}
     fun setStatus(text: String, minutes: Long) {}
     fun clearStatus() {}
     fun invite() {}

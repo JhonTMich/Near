@@ -1483,6 +1483,7 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
             }
         }
     }
+    AutoPlacesPanel(state, actions)
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1547,6 +1548,84 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
 }
 
 private enum class AccountSheet { Profile, Password, Delete }
+
+/**
+ * Automatic status by place. The places are saved only on this phone; the only thing shared is the label,
+ * as a normal status. Location permission is asked for when the first place is saved, not before.
+ */
+@Composable
+private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
+    val context = LocalContext.current
+    var location by remember { mutableStateOf(com.example.findme.places.AutoPlaces.hasLocation(context)) }
+    var background by remember { mutableStateOf(com.example.findme.places.AutoPlaces.hasBackground(context)) }
+    var adding by rememberSaveable { mutableStateOf(false) }
+    androidx.lifecycle.compose.LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val nowLocation = com.example.findme.places.AutoPlaces.hasLocation(context)
+        val nowBackground = com.example.findme.places.AutoPlaces.hasBackground(context)
+        if (nowLocation != location || nowBackground != background) actions.refreshAutoPlaces()
+        location = nowLocation; background = nowBackground
+    }
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        location = granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (location) adding = true
+    }
+    val askBackground = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {
+        background = com.example.findme.places.AutoPlaces.hasBackground(context)
+        actions.refreshAutoPlaces()
+    }
+    Panel {
+        SectionHeading(Icons.Default.Place, "Estado automático por lugar",
+            "Al llegar a un lugar guardado compartimos su nombre, por ejemplo «En casa», y lo quitamos al salir. " +
+                "Tu ubicación nunca sale del teléfono.")
+        state.autoPlaces.forEach { place ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(place.label, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = { actions.removeAutoPlace(place.id) }, enabled = !state.busy) {
+                    Icon(Icons.Default.DeleteOutline, "Quitar ${place.label}", tint = TextMuted)
+                }
+            }
+        }
+        if (state.autoPlaces.isNotEmpty() && location && !background) {
+            Text("Para que funcione con Near cerrado, permite la ubicación «Todo el tiempo».",
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            SettingsRow(Icons.Default.LocationOn, "Permitir ubicación todo el tiempo") {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+                    askBackground.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        }
+        if (state.autoPlaces.isNotEmpty() && !location) Text("Near ya no tiene permiso de ubicación; los lugares están en pausa.",
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        Text("Un estado que compartas a mano no se reemplaza ni se quita al llegar o salir.", color = TextMuted,
+            style = MaterialTheme.typography.bodySmall)
+        if (state.autoPlaces.size < com.example.findme.places.AutoPlaces.MAX) OutlinedButton(onClick = {
+            if (location) adding = true
+            else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+        }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.AddLocationAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Guardar dónde estoy ahora")
+        }
+    }
+    if (adding) AutoPlaceSheet(state, actions) { adding = false }
+}
+
+@Composable
+private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    var label by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.LABELS.first()) }
+    var submitted by remember { mutableStateOf(false) }
+    val count = state.autoPlaces.size
+    LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
+    Sheet(dismiss, "Guardar este lugar", "Usaremos tu ubicación actual, con un radio de unos 150 metros.") {
+        Choices(com.example.findme.places.AutoPlaces.LABELS, label, { label = it }) { it }
+        Field(label, { label = it.take(60) }, "Estado al llegar")
+        (com.example.findme.places.AutoPlaces.validateLabel(label) ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.addAutoPlace(label) },
+            enabled = !state.busy && com.example.findme.places.AutoPlaces.validateLabel(label) == null, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.busy) "Buscando tu ubicación…" else "Guardar lugar")
+        }
+    }
+}
 
 /** Avatar, name and handle at the top of the profile, with a single entry point to edit them. */
 @Composable
