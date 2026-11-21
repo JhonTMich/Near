@@ -111,6 +111,22 @@ class AccountRepository {
             }
         }).decodeSingle<ScheduleDto>()
 
+    /** Own pauses and those of people who share their schedule; RLS decides. */
+    suspend fun pauses() = client.postgrest["schedule_pauses"].select().decodeList<SchedulePause>()
+
+    suspend fun addPause(title: String, start: String, end: String): SchedulePause =
+        client.postgrest["schedule_pauses"].insert(buildJsonObject {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", userId())
+            put("title", title.trim())
+            put("start_date", start)
+            put("end_date", end)
+        }) { select() }.decodeSingle<SchedulePause>()
+
+    suspend fun deletePause(id: String) {
+        client.postgrest["schedule_pauses"].delete { filter { eq("id", id); eq("user_id", userId()) } }
+    }
+
     suspend fun deleteSchedule(id: String) {
         client.postgrest["personal_schedule"].delete { filter { eq("id", id); eq("user_id", userId()) } }
     }

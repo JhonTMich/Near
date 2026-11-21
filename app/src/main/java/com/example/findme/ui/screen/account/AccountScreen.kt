@@ -79,6 +79,9 @@ import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
 import com.example.findme.domain.model.commonFreeTime
+import com.example.findme.domain.model.covering
+import com.example.findme.domain.model.range
+import com.example.findme.domain.model.validatePause
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import com.example.findme.domain.model.timeRangeLabel
@@ -539,18 +542,21 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     }
     val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    val pause = state.pauses.covering(profile?.id, now.toLocalDate())
     if (today.isEmpty()) {
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Image(painterResource(R.drawable.near_mascot_head), null, modifier = Modifier.size(74.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Un día a tu ritmo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Nada más por hoy", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text(pause?.title ?: "Un día a tu ritmo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(if (pause != null) "Tu horario está en pausa hasta el ${pause.endLabel()}" else "Nada más por hoy",
+                        style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
             }
             TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
         }
     } else {
+        pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
         SectionHeading(Icons.Default.Schedule, "Después")
         NextActivityCard(next, onOpenSchedule)
         SectionHeading(Icons.Default.CalendarToday, "Agenda de hoy")
@@ -612,8 +618,24 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     val occurrences = week[day - 1]
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
-    }.filter { (_, exception) -> exception.cancelled || exception.date != date.toString() }
-    if (occurrences.isEmpty() && exceptions.isEmpty()) {
+    }.filter { (_, exception) -> !exception.paused && (exception.cancelled || exception.date != date.toString()) }
+    val pause = state.pauses.covering(state.profile?.id, date)
+    var pausing by rememberSaveable { mutableStateOf(false) }
+    var pendingPauseDelete by remember { mutableStateOf<SchedulePause?>(null) }
+    pause?.let { paused ->
+        Panel {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AccentIcon(Icons.Default.BeachAccess, BrandSky)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(paused.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Horario en pausa · ${paused.rangeLabel()}", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text("Tus actividades semanales no aparecen estos días. Las que reprogramaste para una fecha concreta, sí.",
+                color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (occurrences.isEmpty() && exceptions.isEmpty() && pause == null) {
         EmptyPanel(Icons.Default.EventAvailable, "Espacio para tus planes", "Añade una clase, tu trabajo o una actividad personal.")
     }
     occurrences.forEach { occurrence ->
@@ -664,11 +686,15 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy) { oneOff = schedule.id to date }
         }
     }
+    SchedulePausesPanel(state, today, onAdd = { pausing = true }, onDelete = { pendingPauseDelete = it })
     oneOff?.let { (id, original) ->
         state.schedules.find { it.id == id }?.let { schedule ->
             ScheduleOccurrenceEditor(schedule, original, today, state, actions) { oneOff = null }
         }
     }
+    if (pausing) PauseEditor(state, actions, today) { pausing = false }
+    pendingPauseDelete?.let { paused -> Confirm("¿Quitar la pausa «${paused.title}»?", "Tu horario semanal volverá a aplicarse del ${paused.rangeLabel()}.",
+        { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, state, actions) { showEditor = false }
     pendingDelete?.let { schedule -> Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
         { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null }) }
@@ -676,6 +702,89 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
 
 private fun LocalDate.longDate(): String =
     format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.forLanguageTag("es")))
+
+private val shortDate = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+private fun SchedulePause.endLabel(): String = range()?.second?.format(shortDate) ?: endDate
+private fun SchedulePause.rangeLabel(): String = range()?.let { (start, end) ->
+    if (start == end) start.format(shortDate) else "${start.format(shortDate)} al ${end.format(shortDate)}"
+} ?: "$startDate al $endDate"
+
+/** Upcoming pauses, with the way to add one. Past pauses are not shown. */
+@Composable
+private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: () -> Unit, onDelete: (SchedulePause) -> Unit) {
+    val upcoming = state.pauses.filter { it.userId == state.profile?.id && it.range()?.second?.isBefore(today) == false }
+        .sortedBy { it.startDate }
+    Panel {
+        SectionHeading(Icons.Default.BeachAccess, "Pausas del horario", "Vacaciones, feriados o semanas sin clases.")
+        upcoming.forEach { pause ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(pause.title, fontWeight = FontWeight.SemiBold)
+                    Text(pause.rangeLabel(), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                IconButton(onClick = { onDelete(pause) }, enabled = !state.busy) {
+                    Icon(Icons.Default.DeleteOutline, "Quitar la pausa ${pause.title}", tint = TextMuted)
+                }
+            }
+        }
+        OutlinedButton(onClick = onAdd, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.BeachAccess, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Pausar mi horario")
+        }
+    }
+}
+
+@Composable
+private fun PauseEditor(state: AccountState, actions: AccountActions, today: LocalDate, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var title by rememberSaveable { mutableStateOf("Vacaciones") }
+    var startText by rememberSaveable { mutableStateOf<String?>(null) }
+    var endText by rememberSaveable { mutableStateOf<String?>(null) }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    val start = startText?.let(LocalDate::parse)
+    val end = endText?.let(LocalDate::parse)
+    val problem = validatePause(title, start, end, today)
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Pausar mi horario", "Tus actividades semanales no aparecerán esos días, ni para ti ni para tu gente.", gesturesEnabled = false) {
+        Choices(listOf("Vacaciones", "Feriado", "Exámenes", "Viaje"), title, { title = it }) { it }
+        Field(title, { title = it.take(60) }, "Nombre de la pausa")
+        SelectField("Fechas", if (start != null && end != null)
+            SchedulePause(title = title, startDate = start.toString(), endDate = end.toString()).rangeLabel() else "Elige el inicio y el fin",
+            onClick = { picking = true }, expanded = picking, trailing = Icons.Default.DateRange)
+        (problem?.takeIf { start != null || submitted } ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.addPause(draftId, title, startText.orEmpty(), endText.orEmpty()) },
+            enabled = !state.busy && problem == null, modifier = Modifier.fillMaxWidth()) { Text("Pausar horario") }
+    }
+    if (picking) PauseRangePicker(today, start, end, dismiss = { picking = false }) { from, to ->
+        startText = from.toString(); endText = to.toString(); picking = false
+    }
+}
+
+@Composable
+private fun PauseRangePicker(today: LocalDate, start: LocalDate?, end: LocalDate?, dismiss: () -> Unit,
+    onPicked: (LocalDate, LocalDate) -> Unit) {
+    fun LocalDate.millis() = atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    fun Long.date() = Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val last = today.plusDays(366)
+    val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = start?.millis(),
+        initialSelectedEndDateMillis = end?.millis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis.date().let { !it.isBefore(today) && !it.isAfter(last) }
+            override fun isSelectableYear(year: Int) = year in today.year..last.year
+        })
+    DatePickerDialog(onDismissRequest = dismiss, confirmButton = {
+        TextButton(onClick = {
+            val from = picker.selectedStartDateMillis?.date()
+            if (from != null) onPicked(from, picker.selectedEndDateMillis?.date() ?: from)
+        }, enabled = picker.selectedStartDateMillis != null) { Text("Listo") }
+    }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancelar") } }) {
+        DateRangePicker(picker, Modifier.heightIn(max = 520.dp), title = {
+            Text("Elige la primera y la última fecha", Modifier.padding(start = 24.dp, top = 16.dp))
+        }, showModeToggle = false)
+    }
+}
 
 @Composable
 private fun ScheduleOccurrenceEditor(
@@ -689,7 +798,8 @@ private fun ScheduleOccurrenceEditor(
     }
     var originalText by rememberSaveable { mutableStateOf(originals.firstOrNull { it == preferredDate }?.toString() ?: next.toString()) }
     val original = LocalDate.parse(originalText)
-    val existing = schedule.occurrenceExceptions[originalText]
+    // A date inside a pause looks cancelled on the device, but has no change of its own on the server.
+    val existing = schedule.occurrenceExceptions[originalText]?.takeUnless { it.paused }
     val draftId = rememberSaveable { UUID.randomUUID().toString() }
     var submitted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
@@ -1043,6 +1153,9 @@ private fun People(state: AccountState, actions: AccountActions) {
                 val personDate = LocalDate.now(person.zone()).with(TemporalAdjusters.nextOrSame(DayOfWeek.of(personDay)))
                 Text(personDate.longDate(), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 val schedules = state.personSchedules.occurrencesOn(personDate, person.zone()).map { it.schedule }
+                state.pauses.covering(person.id, personDate)?.let { pause ->
+                    StatusPill("${pause.title} · horario en pausa hasta el ${pause.endLabel()}", BrandSky)
+                }
                 if (schedules.isEmpty()) Text("Sin actividades programadas", color = TextSecondary)
                 schedules.forEachIndexed { index, schedule -> ActivityTimelineCard(schedule, false,
                     last = index == schedules.lastIndex, displayDay = personDay) }

@@ -9,6 +9,7 @@ import com.example.findme.data.repository.AccountRepository
 import com.example.findme.domain.model.validateSchedule
 import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
+import com.example.findme.domain.model.withPauses
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,7 +69,9 @@ data class AccountState(
     val messages: List<QuickMessage> = emptyList(),
     val signals: List<ConnectionSignal> = emptyList(),
     val invitation: ConnectionInvitation? = null,
-    val preferences: List<ConnectionPreference> = emptyList()
+    val preferences: List<ConnectionPreference> = emptyList(),
+    /** Own pauses and those of people who share their schedule. Already applied to the schedules above. */
+    val pauses: List<SchedulePause> = emptyList()
 ) {
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
@@ -234,6 +237,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val statusesRequest = async { readSection("statuses", repository::accessibleStatuses) }
             val visibilityRequest = async { readSection("incoming visibility", repository::incomingConnectionVisibility) }
             val preferencesRequest = async { readSection("connection preferences", repository::connectionPreferences) }
+            // Not part of a complete sync: a server without the pauses table still syncs everything else.
+            val pausesRequest = async { readSection("schedule pauses", repository::pauses) }
             val remoteProfile = profileRequest.await()
             val remoteConnections = connectionsRequest.await()
             val remoteProfiles = profilesRequest.await()
@@ -243,6 +248,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remoteStatuses = statusesRequest.await()
             val remotePreferences = preferencesRequest.await()
             val remoteVisibility = visibilityRequest.await()
+            val remotePauses = pausesRequest.await()
             if (repository.auth.currentUserOrNull()?.id != id) return@coroutineScope
 
             val old = _state.value
@@ -264,11 +270,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val previousSchedules = if (previous == null) emptyList() else allSchedules
             val previousStatuses = if (previous == null) emptyList() else allStatuses
             // An older response must not undo a confirmed save or resurrect a deleted row.
-            val ownSchedules = if (remoteSchedules != null && scheduleSync.canApplySnapshot(scheduleRevision)) {
+            val pauses = (remotePauses ?: previous?.pauses.orEmpty()).filter { it.userId in visibleIds }
+            val ownSchedules = (if (remoteSchedules != null && scheduleSync.canApplySnapshot(scheduleRevision)) {
                 remoteSchedules.filter { it.userId == id }
-            } else previous?.schedules.orEmpty()
+            } else previous?.schedules.orEmpty()).withPauses(pauses)
             val schedules = (remoteSchedules ?: previousSchedules)
-                .filter { it.userId != id && it.userId in visibleIds } + ownSchedules
+                .filter { it.userId != id && it.userId in visibleIds }.withPauses(pauses) + ownSchedules
             val statuses = (remoteStatuses ?: previousStatuses).filter { it.userId in visibleIds }
             if (baselineOwner != id) {
                 baselineOwner = id
@@ -282,7 +289,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(signedIn = true, profile = profile,
                 schedules = ownSchedules, statuses = statuses.filter { it.userId == id },
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
-                preferences = preferences, selectedPerson = selected, personSchedules = schedules.filter { it.userId == selected?.id },
+                preferences = preferences, pauses = pauses, selectedPerson = selected, personSchedules = schedules.filter { it.userId == selected?.id },
                 personStatuses = statuses.filter { it.userId == selected?.id }, lastSync = syncedAt, syncIssue = !complete,
                 incomingVisibility = remoteVisibility.orEmpty().filter { it.personId in peopleIds }.associateBy { it.personId },
                 peopleSchedulesFresh = remoteSchedules != null, peopleStatusesFresh = remoteStatuses != null) }
@@ -315,7 +322,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val profile = current.profile ?: return
         saveCache(AccountSnapshot(profile.id, profile, current.profiles, allSchedules, allStatuses,
             current.connections, current.messages, current.signals, current.lastSync?.toString().orEmpty(),
-            current.preferences))
+            current.preferences, current.pauses))
     }
 
     private suspend fun saveCache(snapshot: AccountSnapshot) {
@@ -341,7 +348,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(signedIn = true, initializing = false, profile = cached.profile,
             schedules = cached.schedules.filter { row -> row.userId == id }, statuses = cached.statuses.filter { row -> row.userId == id },
             connections = cached.connections, profiles = cached.profiles, messages = cached.messages, signals = signals,
-            preferences = cached.preferences,
+            preferences = cached.preferences, pauses = cached.pauses,
             selectedPerson = selected, personSchedules = cached.schedules.filter { row -> row.userId == selected?.id },
             personStatuses = cached.statuses.filter { row -> row.userId == selected?.id },
             lastSync = runCatching { Instant.parse(cached.syncedAt) }.getOrNull()) }
@@ -483,7 +490,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val ownerId = repository.userId()
             scheduleSync.beginWrite()
             try {
-                val rows = repository.saveSchedules(activities.map { it.copy(userId = ownerId) })
+                val rows = repository.saveSchedules(activities.map { it.copy(userId = ownerId) }).withPauses(_state.value.pauses)
                 if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
 
                 val ids = rows.map { it.id }.toSet()
@@ -502,7 +509,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {
-            val updated = repository.changeScheduleOccurrence(id, originalDate, change)
+            val updated = listOf(repository.changeScheduleOccurrence(id, originalDate, change)).withPauses(_state.value.pauses).single()
             if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
             allSchedules = allSchedules.map { if (it.id == id) updated else it }
             _state.update { old -> old.copy(
@@ -517,6 +524,33 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         } finally {
             scheduleSync.finishWrite()
         }
+        snapshotMutex.withLock { saveCurrentCache() }
+        publishWidgetSnapshot()
+    }
+
+    override fun addPause(draftId: String, title: String, start: String, end: String) = perform {
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        com.example.findme.domain.model.validatePause(title,
+            runCatching { java.time.LocalDate.parse(start) }.getOrNull(), runCatching { java.time.LocalDate.parse(end) }.getOrNull(),
+            java.time.LocalDate.now(zone))?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val pause = repository.addPause(title, start, end)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        replacePauses(_state.value.pauses.filterNot { it.id == pause.id } + pause)
+        _state.update { it.copy(savedScheduleDraftId = draftId, notice = "Tu horario queda en pausa: ${pause.title}.") }
+    }
+    override fun deletePause(id: String) = perform {
+        val owner = repository.userId()
+        repository.deletePause(id)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        replacePauses(_state.value.pauses.filterNot { it.id == id })
+        _state.update { it.copy(notice = "Pausa eliminada. Tu horario vuelve a aplicarse esas fechas.") }
+    }
+    /** Applies the new pauses to every loaded schedule, then saves the cache and refreshes the widget and reminders. */
+    private suspend fun replacePauses(pauses: List<SchedulePause>) {
+        allSchedules = allSchedules.withPauses(pauses)
+        _state.update { old -> old.copy(pauses = pauses, schedules = old.schedules.withPauses(pauses),
+            personSchedules = old.personSchedules.withPauses(pauses)) }
         snapshotMutex.withLock { saveCurrentCache() }
         publishWidgetSnapshot()
     }
@@ -583,7 +617,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun selectPerson(profile: AccountProfile) = perform {
-        val schedules = repository.schedules(profile.id)
+        val schedules = repository.schedules(profile.id).withPauses(_state.value.pauses)
         val statuses = repository.overrides(profile.id)
         _state.update { it.copy(selectedPerson = profile, personSchedules = schedules, personStatuses = statuses) }
     }
@@ -626,7 +660,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val state = _state.value
         val profile = state.profile ?: return null
         return com.example.findme.domain.model.AccountExport.build(profile, state.schedules, state.statuses, state.messages,
-            state.connections, state.profiles, state.signals, Instant.now().toString())
+            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses)
     }
     override fun exportFinished(saved: Boolean) {
         _state.update { it.copy(notice = if (saved) "Copia de tus datos guardada." else null,

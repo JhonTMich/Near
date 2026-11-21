@@ -15,7 +15,8 @@ object AccountExport {
         connections: List<PersonConnection>,
         people: List<AccountProfile>,
         received: List<ConnectionSignal>,
-        exportedAt: String
+        exportedAt: String,
+        pauses: List<SchedulePause> = emptyList()
     ): String {
         val names = people.associate { it.id to it.displayName }
         return json.encodeToString(JsonObject.serializer(), buildJsonObject {
@@ -32,6 +33,11 @@ object AccountExport {
                         put("ends_next_day", row.endsNextDay); put("title", row.title); put("location", row.location)
                         put("category", row.category); put("modality", row.modality)
                     }
+                }
+            }
+            putJsonArray("schedule_pauses") {
+                pauses.filter { it.userId == profile.id }.sortedBy { it.startDate }.forEach { pause ->
+                    addJsonObject { put("title", pause.title); put("start_date", pause.startDate); put("end_date", pause.endDate) }
                 }
             }
             putJsonArray("shared_status") {
