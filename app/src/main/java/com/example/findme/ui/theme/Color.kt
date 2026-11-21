@@ -21,6 +21,8 @@ data class NearPalette(
     val textPrimary: Color, val textSecondary: Color, val textMuted: Color,
     val accentContainer: Color, val skyContainer: Color, val slateContainer: Color,
     val heroGradient: List<Color>, val statusGreen: Color, val university: Color,
+    /** The arched panel under the sign-in forms. */
+    val loginPanel: Color,
 )
 
 val DarkPalette = NearPalette(
@@ -31,6 +33,7 @@ val DarkPalette = NearPalette(
     accentContainer = Color(0xFF34406A), skyContainer = Color(0xFF224A44), slateContainer = Color(0xFF3E3366),
     heroGradient = listOf(Color(0xFF34406E), Color(0xFF3B3F78), Color(0xFF2B3157)),
     statusGreen = Color(0xFF7FD8A0), university = Color(0xFF8FB8F0),
+    loginPanel = Color(0xFF181A33),
 )
 
 // Light theme: warm paper background, white cards and darker accents so text keeps its contrast.
@@ -42,6 +45,7 @@ val LightPalette = NearPalette(
     accentContainer = Color(0xFFDCE4F7), skyContainer = Color(0xFFD3EFE6), slateContainer = Color(0xFFE9E0FA),
     heroGradient = listOf(Color(0xFFE2E8F7), Color(0xFFE8E3F7), Color(0xFFF4F5FB)),
     statusGreen = Color(0xFF237A47), university = Color(0xFF2F68B0),
+    loginPanel = Color(0xFFFFFFFF),
 )
 
 val LocalNearPalette = staticCompositionLocalOf { DarkPalette }
@@ -65,6 +69,7 @@ val TextMuted: Color @Composable @ReadOnlyComposable get() = palette.textMuted
 val AccentContainer: Color @Composable @ReadOnlyComposable get() = palette.accentContainer
 val SkyContainer: Color @Composable @ReadOnlyComposable get() = palette.skyContainer
 val SlateContainer: Color @Composable @ReadOnlyComposable get() = palette.slateContainer
+val LoginPanel: Color @Composable @ReadOnlyComposable get() = palette.loginPanel
 val HeroGradient: List<Color> @Composable @ReadOnlyComposable get() = palette.heroGradient
 
 val StatusGreenText: Color @Composable @ReadOnlyComposable get() = palette.statusGreen

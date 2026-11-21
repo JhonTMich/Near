@@ -12,12 +12,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.findme.BuildConfig
 import com.example.findme.data.local.AccountAlert
-import com.example.findme.data.local.AppAccent
+import com.example.findme.data.local.AppTheme
 import com.example.findme.ui.screen.UpdateState
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.horizontalScroll
@@ -353,7 +355,6 @@ private fun LoginForm(state: AccountState, actions: AccountActions) {
 }
 
 /** Darker panel under the sign-in screens; its top edge arcs like the ledge the mascot peeks over in the icon. */
-private val LoginPanelColor = Color(0xFF181A33)
 private val LedgeShape = GenericShape { size, _ ->
     val depth = size.width * .08f
     moveTo(0f, depth)
@@ -376,7 +377,7 @@ private fun LoginStage(content: @Composable ColumnScope.() -> Unit) {
         Image(painterResource(R.drawable.near_mascot_head), null,
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(176.dp, 128.dp))
         Column(Modifier.padding(top = 116.dp).fillMaxWidth().heightIn(min = screenHeight - 190.dp)
-            .background(LoginPanelColor, LedgeShape).padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp),
+            .background(LoginPanel, LedgeShape).padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
         Image(painterResource(R.drawable.near_mascot_paws), null,
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(176.dp, 128.dp))
@@ -1096,11 +1097,9 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
     }
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AppAccent.entries.forEach { accent ->
-                ChoiceChip(accent.label, state.settings.accent == accent, onClick = { actions.setAccent(accent) },
-                    modifier = Modifier.weight(1f),
-                    leading = { Box(Modifier.size(12.dp).background(brandAccent(accent), CircleShape)) })
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppTheme.entries.forEach { theme ->
+                ThemeOption(theme, state.settings.theme == theme, Modifier.weight(1f)) { actions.setTheme(theme) }
             }
         }
     }
@@ -1225,6 +1224,38 @@ private fun SettingsRow(icon: ImageVector, label: String, enabled: Boolean = tru
         Icon(icon, null, Modifier.size(20.dp), tint = if (tint == TextPrimary && enabled) TextSecondary else color)
         Text(label, Modifier.weight(1f), color = color, style = MaterialTheme.typography.bodyLarge)
         if (chevron) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(20.dp), tint = TextMuted)
+    }
+}
+
+/** A theme card with a small preview drawn in that theme's own colours. */
+@Composable
+private fun ThemeOption(theme: AppTheme, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val preview = if (theme == AppTheme.Light) LightPalette else DarkPalette
+    val primary = MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.clip(shape).border(if (selected) 2.dp else 1.dp, if (selected) primary else CardBorder, shape)
+        .selectable(selected, role = Role.RadioButton, onClick = onClick).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(10.dp)).background(preview.background)
+            .padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp)).background(preview.card)
+                .border(1.dp, preview.cardBorder, RoundedCornerShape(6.dp)).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(14.dp).background(preview.accent, CircleShape))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(width = 44.dp, height = 5.dp).background(preview.textPrimary, CircleShape))
+                    Box(Modifier.size(width = 28.dp, height = 4.dp).background(preview.textMuted, CircleShape))
+                }
+            }
+            Box(Modifier.size(width = 36.dp, height = 8.dp).background(preview.accent, CircleShape))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(if (theme == AppTheme.Light) Icons.Default.LightMode else Icons.Default.DarkMode, null,
+                Modifier.size(18.dp), tint = if (selected) primary else TextSecondary)
+            Text(theme.label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                color = if (selected) primary else TextPrimary)
+            if (selected) Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp), tint = primary)
+        }
     }
 }
 

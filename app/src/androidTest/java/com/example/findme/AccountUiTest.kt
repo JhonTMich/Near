@@ -54,10 +54,10 @@ class AccountUiTest {
     @Test fun brandScreensAcrossNavigationAndAppearance() {
         val current = mutableStateOf(state)
         compose.setContent {
-            NearTheme(accent = current.value.settings.accent) {
+            NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
-                    override fun setAccent(accent: com.example.findme.data.local.AppAccent) {
-                        current.value = current.value.copy(settings = current.value.settings.copy(accent = accent))
+                    override fun setTheme(theme: com.example.findme.data.local.AppTheme) {
+                        current.value = current.value.copy(settings = current.value.settings.copy(theme = theme))
                     }
                 })
             }
@@ -73,9 +73,9 @@ class AccountUiTest {
         compose.onNodeWithText("Perfil").performClick()
         screenshot("brand-profile", composeOnly = true)
         compose.onNodeWithText("Apariencia").performScrollTo()
-        compose.onNodeWithText("Menta").performScrollTo().performClick()
+        compose.onNodeWithText("Claro").performScrollTo().performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Menta").assertIsSelected()
+        compose.onNodeWithText("Claro").assertIsSelected()
         screenshot("brand-appearance", composeOnly = true)
         current.value = AccountState(initializing = false)
         compose.onNodeWithText("Qué bueno verte.").assertIsDisplayed()
@@ -412,17 +412,17 @@ class AccountUiTest {
         assertTrue(finished)
     }
 
-    @Test fun profileRestoresSettingsAndChangesAccent() {
+    @Test fun profileRestoresSettingsAndChangesTheme() {
         val current = androidx.compose.runtime.mutableStateOf(state)
         compose.setContent {
-            NearTheme(accent = current.value.settings.accent) {
+            NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
                     override fun setAlert(alert: com.example.findme.data.local.AccountAlert, enabled: Boolean) {
                         assertEquals(com.example.findme.data.local.AccountAlert.Messages, alert)
                         current.value = current.value.copy(settings = current.value.settings.copy(messages = enabled))
                     }
-                    override fun setAccent(accent: com.example.findme.data.local.AppAccent) {
-                        current.value = current.value.copy(settings = current.value.settings.copy(accent = accent))
+                    override fun setTheme(theme: com.example.findme.data.local.AppTheme) {
+                        current.value = current.value.copy(settings = current.value.settings.copy(theme = theme))
                     }
                 })
             }
@@ -431,10 +431,10 @@ class AccountUiTest {
         compose.onNodeWithText("Mensajes recibidos").performScrollTo().assertIsOn().performClick()
         compose.onNodeWithText("Mensajes recibidos").assertIsOff()
         screenshot("account-profile-notifications-compose", composeOnly = true)
-        compose.onNodeWithText("Menta").performScrollTo().assertIsDisplayed().performClick()
-        compose.onNodeWithText("Menta").assertIsSelected()
-        assertEquals(com.example.findme.data.local.AppAccent.Mint, current.value.settings.accent)
-        screenshot("account-profile-mint-compose", composeOnly = true)
+        compose.onNodeWithText("Claro").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Claro").assertIsSelected()
+        assertEquals(com.example.findme.data.local.AppTheme.Light, current.value.settings.theme)
+        screenshot("account-profile-light-compose", composeOnly = true)
         compose.onNodeWithText("Buscar actualizaciones").performScrollTo().assertIsDisplayed()
     }
 
