@@ -307,6 +307,7 @@ class AccountUiTest {
         var saved = ""
         show(object : AccountActions { override fun saveProfile(name: String, username: String) { saved = name } })
         compose.onNodeWithText("Perfil").performClick()
+        compose.onNodeWithText("Editar perfil").performScrollTo().performClick()
         compose.onNodeWithText("Guardar perfil").assertIsNotEnabled()
         compose.onNodeWithText("Nombre visible").performTextReplacement("Miguel")
         compose.onNodeWithText("Guardar perfil").performScrollTo().performClick()
