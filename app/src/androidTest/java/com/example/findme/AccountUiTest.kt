@@ -130,7 +130,7 @@ class AccountUiTest {
                     savedModality = it.modality
                     assertEquals("university", it.category)
                     assertEquals("21:01", it.startTime)
-                    assertEquals("22:00", it.endTime)
+                    assertEquals("22:01", it.endTime)
                 }
             }
         }, snapshot = state.copy(schedules = listOf(schedule, work)))

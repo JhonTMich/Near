@@ -2,6 +2,7 @@ package com.example.findme.domain.model
 
 import com.example.findme.data.model.ScheduleDto
 import java.time.DayOfWeek
+import java.time.LocalTime
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -37,4 +38,22 @@ fun ScheduleDto.conflictMessage(): String {
     val day = DayOfWeek.of(dayOfWeek).getDisplayName(TextStyle.FULL, Locale.forLanguageTag("es"))
     val overnight = if (endsNextDay) " del día siguiente" else ""
     return "Coincide con «$title» el $day (${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}$overnight). Cambia el horario o el día."
+}
+
+private const val DAY = 86_400_000_000_000L
+
+/**
+ * Moves the end together with a new start so the activity keeps its length.
+ * Returns the new end ("HH:mm") and whether it now finishes the next day, or null if
+ * the current range can't be measured (then the end is left untouched).
+ */
+fun shiftScheduleEnd(oldStart: String, oldEnd: String, endsNextDay: Boolean, newStart: String): Pair<String, Boolean>? {
+    val from = runCatching { scheduleTimeNanos(oldStart) }.getOrNull() ?: return null
+    val to = runCatching { scheduleTimeNanos(oldEnd) }.getOrNull() ?: return null
+    val target = runCatching { scheduleTimeNanos(newStart) }.getOrNull()?.takeIf { it < DAY } ?: return null
+    val duration = if (endsNextDay) to + DAY - from else to - from
+    if (duration !in 1..DAY) return null
+    val end = target + duration
+    val time = LocalTime.ofNanoOfDay(end % DAY)
+    return String.format(Locale.ROOT, "%02d:%02d", time.hour, time.minute) to (end >= DAY)
 }

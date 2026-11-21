@@ -67,6 +67,7 @@ import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
 import com.example.findme.domain.model.formatScheduleTime
 import com.example.findme.domain.model.validateSchedule
+import com.example.findme.domain.model.shiftScheduleEnd
 import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
@@ -704,7 +705,13 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
                 { category = it.key }, Modifier.weight(1f), leading = ActivityCategory.fromKey(category).icon) { it.label }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) { TimeField(start, { start = it }, "Inicio") }
+            Box(Modifier.weight(1f)) { TimeField(start, { newStart ->
+                // Keep the activity's length so changing the start rarely needs a second edit.
+                shiftScheduleEnd(start, end, endsNextDay, newStart)?.let { (newEnd, nextDay) ->
+                    end = newEnd; endsNextDay = nextDay
+                }
+                start = newStart
+            }, "Inicio") }
             Box(Modifier.weight(1f)) { TimeField(end, { end = it }, "Fin") }
         }
         Row(
