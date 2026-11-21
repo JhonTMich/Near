@@ -34,7 +34,7 @@ import com.example.findme.util.ApkUpdateInstaller
 import com.example.findme.domain.model.ConfirmationLink
 import androidx.compose.material3.AlertDialog
 import com.example.findme.data.local.AccountSettingsRepository
-import com.example.findme.data.local.AppAccent
+import com.example.findme.data.local.AppTheme
 import com.example.findme.util.NotificationHelper
 
 private const val NOTIFICATION_PROMPT_SEEN = "notification_prompt_seen"
@@ -83,9 +83,16 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         setContent {
-            val accent by appSettings.accent.collectAsStateWithLifecycle(initialValue = AppAccent.Indigo)
+            val theme by appSettings.theme.collectAsStateWithLifecycle(initialValue = AppTheme.Dark)
+            // Status and navigation bar icons follow the theme so they stay visible on a light background.
+            LaunchedEffect(theme) {
+                val bars = if (theme == AppTheme.Light)
+                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+            }
             val accountState by accountViewModel.state.collectAsStateWithLifecycle()
-            NearTheme(accent = accent) {
+            NearTheme(theme = theme) {
                 val updateState by updateViewModel.state.collectAsStateWithLifecycle()
                 // Defer the installer until this activity is visible; consume each request once.
                 LifecycleResumeEffect(updateState.requestInstall) {

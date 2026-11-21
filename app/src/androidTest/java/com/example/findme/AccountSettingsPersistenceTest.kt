@@ -18,17 +18,17 @@ class AccountSettingsPersistenceTest {
         try {
             repository.setAlert(owner, AccountAlert.Messages, false)
             repository.setAlert(owner, AccountAlert.Activities, false)
-            repository.setAccent(AppAccent.Mint)
+            repository.setTheme(AppTheme.Light)
             val restored = AccountSettingsRepository(context).settings(owner).first()
             assertFalse(restored.messages)
             assertFalse(restored.activities)
-            assertEquals(AppAccent.Mint, restored.accent)
+            assertEquals(AppTheme.Light, restored.theme)
             assertEquals(otherPrevious.messages, repository.settings(other).first().messages)
             assertEquals(otherPrevious.activities, repository.settings(other).first().activities)
         } finally {
             repository.setAlert(owner, AccountAlert.Messages, previous.messages)
             repository.setAlert(owner, AccountAlert.Activities, previous.activities)
-            repository.setAccent(previous.accent)
+            repository.setTheme(previous.theme)
         }
     }
 }

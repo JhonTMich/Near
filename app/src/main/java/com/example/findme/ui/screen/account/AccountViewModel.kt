@@ -398,7 +398,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val id = repository.auth.currentUserOrNull()?.id ?: return
         viewModelScope.launch { preferences.setAlert(id, alert, enabled) }
     }
-    override fun setAccent(accent: AppAccent) { viewModelScope.launch { preferences.setAccent(accent) } }
+    override fun setTheme(theme: AppTheme) { viewModelScope.launch { preferences.setTheme(theme) } }
     override fun setReminders(enabled: Boolean) {
         val id = repository.auth.currentUserOrNull()?.id ?: return
         viewModelScope.launch {

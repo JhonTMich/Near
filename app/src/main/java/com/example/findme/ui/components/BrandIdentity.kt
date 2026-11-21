@@ -32,6 +32,8 @@ fun BrandMark(modifier: Modifier = Modifier) {
 /** Decorative curves echo the eye mark without implying a live location. */
 @Composable
 fun BrandContour(modifier: Modifier = Modifier) {
+    val ink = TextPrimary
+    val warm = BrandBlue
     Canvas(modifier) {
         val upper = androidx.compose.ui.graphics.Path().apply {
             moveTo(0f, size.height * .7f)
@@ -41,9 +43,9 @@ fun BrandContour(modifier: Modifier = Modifier) {
             moveTo(size.width * .2f, size.height * .8f)
             cubicTo(size.width * .5f, size.height * 1.1f, size.width * .8f, size.height, size.width, size.height * .7f)
         }
-        drawPath(upper, TextPrimary, style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
-        drawPath(lower, BrandBlue, style = Stroke(8.dp.toPx(), cap = StrokeCap.Round))
-        drawCircle(TextPrimary, size.width * .08f, Offset(size.width * .8f, size.height * .55f))
+        drawPath(upper, ink, style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(lower, warm, style = Stroke(8.dp.toPx(), cap = StrokeCap.Round))
+        drawCircle(ink, size.width * .08f, Offset(size.width * .8f, size.height * .55f))
     }
 }
 
