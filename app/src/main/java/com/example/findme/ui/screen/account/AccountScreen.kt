@@ -95,7 +95,6 @@ import androidx.compose.foundation.shape.GenericShape
 
 private val days = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
 private val hourFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
-private val cyan = BrandSky
 private fun AccountProfile.zone() = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.systemDefault())
 
 @Composable
@@ -1277,7 +1276,7 @@ private fun CardAction(icon: ImageVector, label: String, enabled: Boolean, modif
 @Composable
 private fun EmptyPanel(icon: ImageVector, title: String, description: String) {
     Panel {
-        AccentIcon(icon, cyan)
+        AccentIcon(icon, BrandSky)
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(description, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }
