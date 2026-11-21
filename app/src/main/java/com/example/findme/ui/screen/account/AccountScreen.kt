@@ -81,6 +81,7 @@ import com.example.findme.data.model.SharedSchedules
 import com.example.findme.domain.model.commonFreeTime
 import com.example.findme.domain.model.FreeSlot
 import com.example.findme.domain.model.Plans
+import com.example.findme.domain.model.StatusUntil
 import com.example.findme.domain.model.covering
 import com.example.findme.domain.model.range
 import com.example.findme.domain.model.validatePause
@@ -577,6 +578,10 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
 private fun StatusEditor(state: AccountState, actions: AccountActions, current: UserCurrentStatus.Override?, dismiss: () -> Unit) {
     var text by rememberSaveable { mutableStateOf(current?.customLocation.orEmpty()) }
     var minutes by rememberSaveable { mutableStateOf(60L) }
+    // -1 means "until a chosen time"; the length is computed when sharing, from the current time.
+    val zone = state.profile?.zone() ?: ZoneId.systemDefault()
+    var until by rememberSaveable { mutableStateOf(StatusUntil.suggestion(ZonedDateTime.now(zone)).format(hourFormat)) }
+    val untilMinutes = StatusRepository.parseLocalTimeOrNull(until)?.let { StatusUntil.minutes(it, ZonedDateTime.now(zone)) }
     var submitted by remember { mutableStateOf(false) }
     LaunchedEffect(state.notice, state.busy) {
         if (submitted && !state.busy && state.notice in listOf("Estado actualizado.", "Se muestra tu horario de nuevo.")) dismiss()
@@ -585,10 +590,22 @@ private fun StatusEditor(state: AccountState, actions: AccountActions, current: 
         Choices(listOf("En camino a casa", "En casa", "Ocupado", "Disponible"), text, { text = it }) { it }
         Field(text, { text = it.take(120) }, "¿Qué estás haciendo?", placeholder = "Escribe tu propio estado")
         Text("¿Durante cuánto tiempo?", style = MaterialTheme.typography.titleSmall)
-        Choices(listOf(30L, 60L, 120L, 240L), minutes, { minutes = it }) { if (it < 60) "$it min" else "${it / 60} h" }
+        Choices(listOf(30L, 60L, 120L, 240L, -1L), minutes, { minutes = it }) { when { it < 0 -> "Hasta…"; it < 60 -> "$it min"; else -> "${it / 60} h" } }
+        if (minutes < 0) {
+            TimeField(until, { until = it }, "Hasta las")
+            untilMinutes?.let {
+                Text("Durará ${StatusUntil.lengthLabel(it)}" + if (it >= 1440) ", el máximo para un estado." else ".",
+                    color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Text("Al terminar se mostrará de nuevo tu horario. Puedes cambiarlo cuando quieras.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
         if (submitted) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { submitted = true; actions.setStatus(text, minutes) }, enabled = !state.busy && text.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Compartir estado") }
+        Button(onClick = {
+            submitted = true
+            // Measured now, not when the time was picked, so it ends exactly at the chosen time.
+            val length = if (minutes < 0) StatusRepository.parseLocalTimeOrNull(until)?.let { StatusUntil.minutes(it, ZonedDateTime.now(zone)) } else minutes
+            if (length != null) actions.setStatus(text, length)
+        }, enabled = !state.busy && text.isNotBlank() && (minutes > 0 || untilMinutes != null), modifier = Modifier.fillMaxWidth()) { Text("Compartir estado") }
         if (current != null) TextButton(onClick = { submitted = true; actions.clearStatus() }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Quitar estado y volver al horario") }
     }
 }
