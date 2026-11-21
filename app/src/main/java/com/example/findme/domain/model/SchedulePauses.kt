@@ -14,6 +14,8 @@ fun List<ScheduleDto>.withPauses(pauses: List<SchedulePause>): List<ScheduleDto>
     val byOwner = pauses.groupBy { it.userId }
     return map { schedule ->
         val clean = schedule.withoutPauses()
+        // A one-off activity was planned for its date, pause or not.
+        if (clean.isOneOff) return@map clean
         val ranges = byOwner[schedule.userId].orEmpty().mapNotNull { it.range() }
         if (ranges.isEmpty()) return@map clean
         val added = ranges.flatMap { (start, end) ->

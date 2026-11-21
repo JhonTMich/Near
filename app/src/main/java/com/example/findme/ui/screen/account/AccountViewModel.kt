@@ -482,7 +482,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             require(activities.isNotEmpty()) { "Elige al menos un día." }
             val currentSchedules = _state.value.schedules
             activities.forEach { activity ->
-                val error = validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
+                val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+                val error = activity.oneOffDate?.let { date ->
+                    runCatching { java.time.LocalDate.parse(date) }.getOrNull()
+                        ?.let { com.example.findme.domain.model.validateOneOffDate(it, java.time.LocalDate.now(zone)) }
+                        ?: if (java.time.LocalDate.parse(date).dayOfWeek.value != activity.dayOfWeek) "Elige una fecha válida." else null
+                } ?: validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
                     ?: findScheduleConflict(currentSchedules, activity)?.conflictMessage()
                 if (error != null) throw IllegalArgumentException(error)
             }

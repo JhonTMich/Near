@@ -13,6 +13,11 @@ data class ScheduleOccurrence(val schedule: ScheduleDto, val originalDate: Local
 /** Dates are interpreted in the schedule owner's zone. Overnight occurrences keep their original start date. */
 fun ScheduleDto.occurrences(from: LocalDate, through: LocalDate, zone: ZoneId): Sequence<ScheduleOccurrence> {
     if (from.isAfter(through)) return emptySequence()
+    oneOffDate?.let { value ->
+        val date = runCatching { LocalDate.parse(value) }.getOrNull() ?: return emptySequence()
+        if (date.isBefore(from) || date.isAfter(through)) return emptySequence()
+        return listOfNotNull(occurrence(date, date, zone)).asSequence()
+    }
     val first = from.with(TemporalAdjusters.nextOrSame(java.time.DayOfWeek.of(dayOfWeek)))
     val recurring = generateSequence(first) { it.plusWeeks(1) }
         .takeWhile { !it.isAfter(through) }

@@ -27,11 +27,12 @@ object AccountExport {
                 put("timezone", profile.timezone)
             }
             putJsonArray("schedule") {
-                schedules.filter { it.userId == profile.id }.sortedWith(compareBy({ it.dayOfWeek }, { it.startTime })).forEach { row ->
+                schedules.filter { it.userId == profile.id }.sortedWith(compareBy({ it.oneOffDate.orEmpty() }, { it.dayOfWeek }, { it.startTime })).forEach { row ->
                     addJsonObject {
                         put("day_of_week", row.dayOfWeek); put("start_time", row.startTime); put("end_time", row.endTime)
                         put("ends_next_day", row.endsNextDay); put("title", row.title); put("location", row.location)
                         put("category", row.category); put("modality", row.modality)
+                        row.oneOffDate?.let { put("only_on", it) }
                     }
                 }
             }

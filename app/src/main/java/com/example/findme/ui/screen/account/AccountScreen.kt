@@ -82,6 +82,7 @@ import com.example.findme.domain.model.commonFreeTime
 import com.example.findme.domain.model.covering
 import com.example.findme.domain.model.range
 import com.example.findme.domain.model.validatePause
+import com.example.findme.domain.model.validateOneOffDate
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import com.example.findme.domain.model.timeRangeLabel
@@ -650,6 +651,7 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                     Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
                     Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     if (reprogrammed) StatusPill("Reprogramada", BrandSky)
+                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -662,15 +664,22 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             }
             HorizontalDivider(color = CardBorder)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    oneOff = recurring.id to occurrence.originalDate
-                }
-                CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    editing = recurring; showEditor = true
+                if (recurring.isOneOff) {
+                    CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        editing = recurring; showEditor = true
+                    }
+                } else {
+                    CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        oneOff = recurring.id to occurrence.originalDate
+                    }
+                    CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        editing = recurring; showEditor = true
+                    }
                 }
                 IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
                     colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
-                    Icon(Icons.Default.DeleteOutline, "Eliminar serie de ${schedule.title}", tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
+                    Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
                 }
             }
         }
@@ -695,9 +704,13 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     if (pausing) PauseEditor(state, actions, today) { pausing = false }
     pendingPauseDelete?.let { paused -> Confirm("¿Quitar la pausa «${paused.title}»?", "Tu horario semanal volverá a aplicarse del ${paused.rangeLabel()}.",
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
-    if (showEditor) ScheduleEditor(editing, day, state, actions) { showEditor = false }
-    pendingDelete?.let { schedule -> Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
-        { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null }) }
+    if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
+    pendingDelete?.let { schedule ->
+        if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+        else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+    }
 }
 
 private fun LocalDate.longDate(): String =
@@ -759,6 +772,22 @@ private fun PauseEditor(state: AccountState, actions: AccountActions, today: Loc
     }
     if (picking) PauseRangePicker(today, start, end, dismiss = { picking = false }) { from, to ->
         startText = from.toString(); endText = to.toString(); picking = false
+    }
+}
+
+@Composable
+private fun SingleDatePicker(selected: LocalDate, first: LocalDate, last: LocalDate, dismiss: () -> Unit, onPicked: (LocalDate) -> Unit) {
+    fun LocalDate.millis() = atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    fun Long.date() = Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val picker = rememberDatePickerState(initialSelectedDateMillis = selected.millis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis.date().let { !it.isBefore(first) && !it.isAfter(last) }
+            override fun isSelectableYear(year: Int) = year in first.year..last.year
+        })
+    DatePickerDialog(onDismissRequest = dismiss, confirmButton = {
+        TextButton(onClick = { picker.selectedDateMillis?.date()?.let(onPicked) }, enabled = picker.selectedDateMillis != null) { Text("Listo") }
+    }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancelar") } }) {
+        DatePicker(picker, showModeToggle = false)
     }
 }
 
@@ -851,9 +880,15 @@ private fun ScheduleOccurrenceEditor(
 }
 
 @Composable
-private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, initialDate: LocalDate, today: LocalDate,
+    state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
     val draftId = rememberSaveable { UUID.randomUUID().toString() }
     val editingId by rememberSaveable { mutableStateOf(existing?.id) }
+    // A weekly series and a one-off activity cannot be turned into each other; only new activities choose.
+    var once by rememberSaveable { mutableStateOf(existing?.isOneOff ?: false) }
+    var onceText by rememberSaveable { mutableStateOf(existing?.oneOffDate ?: maxOf(initialDate, today).toString()) }
+    var pickingDate by rememberSaveable { mutableStateOf(false) }
+    val onceDate = LocalDate.parse(onceText)
     var title by rememberSaveable { mutableStateOf(existing?.title.orEmpty()) }
     var location by rememberSaveable { mutableStateOf(existing?.location.orEmpty()) }
     var start by rememberSaveable { mutableStateOf(existing?.startTime ?: "09:00") }
@@ -863,27 +898,37 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
     var category by rememberSaveable { mutableStateOf(existing?.category ?: "university") }
     var modality by rememberSaveable { mutableStateOf(existing?.modality ?: "presencial") }
     var submitted by rememberSaveable { mutableStateOf(false) }
-    val activities = selectedDays.map { day ->
+    val activities = if (once) listOf(ScheduleDto(
+        id = editingId ?: UUID.nameUUIDFromBytes("$draftId:once".toByteArray(Charsets.UTF_8)).toString(),
+        dayOfWeek = onceDate.dayOfWeek.value, startTime = start.trim(), endTime = end.trim(),
+        title = title.trim(), location = location.trim(), category = category, modality = modality,
+        endsNextDay = endsNextDay, oneOffDate = onceText))
+    else selectedDays.map { day ->
         val id = editingId ?: UUID.nameUUIDFromBytes("$draftId:$day".toByteArray(Charsets.UTF_8)).toString()
         ScheduleDto(id = id, dayOfWeek = day, startTime = start.trim(), endTime = end.trim(),
             title = title.trim(), location = location.trim(), category = category, modality = modality,
             endsNextDay = endsNextDay)
     }
     // Problems are only reported after a save attempt, so editing never flashes errors mid-way.
-    val problem = if (selectedDays.isEmpty()) "Elige al menos un día."
-        else validateSchedule(selectedDays.first(), start, end, title, endsNextDay)
-            ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
+    val problem = (if (once) validateOneOffDate(onceDate, today) else if (selectedDays.isEmpty()) "Elige al menos un día." else null)
+        ?: validateSchedule(activities.first().dayOfWeek, start, end, title, endsNextDay)
+        ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
     var showProblem by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality) { showProblem = false }
+    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality, once, onceText) { showProblem = false }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
         if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
     }
-    Sheet(dismiss, if (editingId == null) "Nueva actividad" else "Editar serie semanal", gesturesEnabled = false) {
-        Field(title, { title = it.take(120) }, "Título", placeholder = "Ej. Clase de inglés")
-        if (editingId == null) {
-            ScheduleDays(selectedDays, { selectedDays = it })
-        } else {
-            ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
+    Sheet(dismiss, when { editingId == null -> "Nueva actividad"; once -> "Editar actividad"; else -> "Editar serie semanal" }, gesturesEnabled = false) {
+        Field(title, { title = it.take(120) }, "Título", placeholder = if (once) "Ej. Cita médica" else "Ej. Clase de inglés")
+        if (editingId == null) Choices(listOf(false, true), once, { once = it }) { if (it) "Una sola fecha" else "Cada semana" }
+        when {
+            once -> SelectField("Fecha", onceDate.longDate().replaceFirstChar(Char::titlecase), onClick = { pickingDate = true },
+                expanded = pickingDate, trailing = Icons.Default.Event)
+            editingId == null -> ScheduleDays(selectedDays, { selectedDays = it })
+            else -> ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
+        }
+        if (pickingDate) SingleDatePicker(onceDate, today, today.plusDays(366), dismiss = { pickingDate = false }) {
+            onceText = it.toString(); pickingDate = false
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
