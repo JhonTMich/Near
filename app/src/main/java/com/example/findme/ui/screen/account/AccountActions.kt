@@ -7,7 +7,7 @@ import com.example.findme.data.model.ScheduleDto
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
 import com.example.findme.data.local.AccountAlert
-import com.example.findme.data.local.AppAccent
+import com.example.findme.data.local.AppTheme
 
 /** UI actions kept separate so the account screens can be previewed without a live session. */
 interface AccountActions {
@@ -22,7 +22,7 @@ interface AccountActions {
     fun logout() {}
     fun saveProfile(name: String, username: String) {}
     fun setAlert(alert: AccountAlert, enabled: Boolean) {}
-    fun setAccent(accent: AppAccent) {}
+    fun setTheme(theme: AppTheme) {}
     fun setReminders(enabled: Boolean) {}
     fun setReminderMinutes(minutes: Int) {}
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}

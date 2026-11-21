@@ -4,6 +4,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.example.findme.ui.theme.AccentFree
@@ -13,35 +15,31 @@ import com.example.findme.ui.theme.AccentWork
 enum class ActivityCategory(
     val key: String,
     val label: String,
-    val accentColor: Color,
-    val containerColor: Color,
-    val badgeBgColor: Color,
     val icon: ImageVector
 ) {
     UNIVERSITY(
         key = "university",
         label = "Universidad",
-        accentColor = AccentUniversity,
-        containerColor = Color(0xFFE5E6FB),
-        badgeBgColor = AccentUniversity,
         icon = Icons.Default.School
     ),
     WORK(
         key = "work",
         label = "Trabajo",
-        accentColor = AccentWork,
-        containerColor = Color(0xFFD3F1EB),
-        badgeBgColor = AccentWork,
         icon = Icons.Default.Work
     ),
     FREE(
         key = "free",
         label = "Tiempo Libre",
-        accentColor = AccentFree,
-        containerColor = Color(0xFFFDEBD8),
-        badgeBgColor = AccentFree,
         icon = Icons.Default.Restaurant
     );
+
+    /** Follows the active theme, so it is read from composition. */
+    val accentColor: Color
+        @Composable @ReadOnlyComposable get() = when (this) {
+            UNIVERSITY -> AccentUniversity
+            WORK -> AccentWork
+            FREE -> AccentFree
+        }
 
     companion object {
         fun fromKey(key: String?, title: String = ""): ActivityCategory {

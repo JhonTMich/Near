@@ -12,12 +12,16 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.findme.BuildConfig
 import com.example.findme.data.local.AccountAlert
-import com.example.findme.data.local.AppAccent
+import com.example.findme.data.local.AppTheme
 import com.example.findme.ui.screen.UpdateState
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.horizontalScroll
@@ -45,12 +49,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -64,6 +73,7 @@ import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
 import com.example.findme.domain.model.formatScheduleTime
 import com.example.findme.domain.model.validateSchedule
+import com.example.findme.domain.model.shiftScheduleEnd
 import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
@@ -94,8 +104,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.GenericShape
 
 private val days = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+private val dayLetters = listOf("L", "M", "X", "J", "V", "S", "D")
 private val hourFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
-private val cyan = BrandSky
 private fun AccountProfile.zone() = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.systemDefault())
 
 @Composable
@@ -354,7 +364,6 @@ private fun LoginForm(state: AccountState, actions: AccountActions) {
 }
 
 /** Darker panel under the sign-in screens; its top edge arcs like the ledge the mascot peeks over in the icon. */
-private val LoginPanelColor = Color(0xFF181A33)
 private val LedgeShape = GenericShape { size, _ ->
     val depth = size.width * .08f
     moveTo(0f, depth)
@@ -377,7 +386,7 @@ private fun LoginStage(content: @Composable ColumnScope.() -> Unit) {
         Image(painterResource(R.drawable.near_mascot_head), null,
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(176.dp, 128.dp))
         Column(Modifier.padding(top = 116.dp).fillMaxWidth().heightIn(min = screenHeight - 190.dp)
-            .background(LoginPanelColor, LedgeShape).padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp),
+            .background(LoginPanel, LedgeShape).padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
         Image(painterResource(R.drawable.near_mascot_paws), null,
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(176.dp, 128.dp))
@@ -395,7 +404,7 @@ private fun CompleteProfile(state: AccountState, actions: AccountActions) {
 }
 
 @Composable
-private fun ProfileNameForm(state: AccountState, actions: AccountActions, completing: Boolean = false) {
+private fun ProfileNameForm(state: AccountState, actions: AccountActions, completing: Boolean = false, onSubmit: () -> Unit = {}) {
     val profile = state.profile ?: return
     var name by rememberSaveable(profile.id, profile.displayName) { mutableStateOf(if (profile.needsName) "" else profile.displayName) }
     var username by rememberSaveable(profile.id, profile.username) { mutableStateOf(profile.username.orEmpty()) }
@@ -405,7 +414,7 @@ private fun ProfileNameForm(state: AccountState, actions: AccountActions, comple
     Field(name, { name = it.take(80) }, "Nombre visible", keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.Words))
     Field(username, { username = it.take(24) }, "Nombre de usuario", keyboard = KeyboardOptions(autoCorrectEnabled = false))
     Text("Para entrar: de 3 a 24 letras sin tildes, números o guion bajo. No distingue mayúsculas.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
-    Button(onClick = { actions.saveProfile(trimmed, normalized) }, modifier = Modifier.fillMaxWidth(),
+    Button(onClick = { onSubmit(); actions.saveProfile(trimmed, normalized) }, modifier = Modifier.fillMaxWidth(),
         enabled = !state.busy && valid && (completing || trimmed != profile.displayName || normalized != profile.username)) {
         Text(if (state.busy) "Guardando…" else if (completing) "Guardar y continuar" else "Guardar perfil")
     }
@@ -679,28 +688,38 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             title = title.trim(), location = location.trim(), category = category, modality = modality,
             endsNextDay = endsNextDay)
     }
-    val invalid = selectedDays.firstOrNull()?.let { validateSchedule(it, start, end, title, endsNextDay) }
-    val conflict = if (invalid == null) {
-        activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }
-    } else null
-    val timeError = validateSchedule(1, start, end, "Actividad", endsNextDay)
+    // Problems are only reported after a save attempt, so editing never flashes errors mid-way.
+    val problem = if (selectedDays.isEmpty()) "Elige al menos un día."
+        else validateSchedule(selectedDays.first(), start, end, title, endsNextDay)
+            ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
+    var showProblem by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality) { showProblem = false }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
         if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
     }
     Sheet(dismiss, if (editingId == null) "Nueva actividad" else "Editar serie semanal", gesturesEnabled = false) {
         Field(title, { title = it.take(120) }, "Título", placeholder = "Ej. Clase de inglés")
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (editingId == null) {
-                ScheduleDays(selectedDays, { selectedDays = it }, Modifier.weight(1f))
-            } else {
-                ScheduleChoice("Día", (1..7).toList(), selectedDays.single(),
-                    { selectedDays = listOf(it) }, Modifier.weight(1f)) { days[it - 1] }
-            }
-            ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
-                { category = it.key }, Modifier.weight(1f), leading = ActivityCategory.fromKey(category).icon) { it.label }
+        if (editingId == null) {
+            ScheduleDays(selectedDays, { selectedDays = it })
+        } else {
+            ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) { TimeField(start, { start = it }, "Inicio") }
+            ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
+                { category = it.key }, Modifier.weight(1f), leading = ActivityCategory.fromKey(category).icon) { it.label }
+            ScheduleChoice("Modalidad", listOf("presencial", "virtual"), modality, { modality = it }, Modifier.weight(1f),
+                leading = if (modality == "virtual") Icons.Default.Videocam else Icons.Default.LocationOn) {
+                it.replaceFirstChar(Char::titlecase)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) { TimeField(start, { newStart ->
+                // Keep the activity's length so changing the start rarely needs a second edit.
+                shiftScheduleEnd(start, end, endsNextDay, newStart)?.let { (newEnd, nextDay) ->
+                    end = newEnd; endsNextDay = nextDay
+                }
+                start = newStart
+            }, "Inicio") }
             Box(Modifier.weight(1f)) { TimeField(end, { end = it }, "Fin") }
         }
         Row(
@@ -713,48 +732,47 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             Text("Termina al día siguiente", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             Switch(checked = endsNextDay, onCheckedChange = null, colors = nearSwitchColors())
         }
-        ScheduleChoice("Modalidad", listOf("presencial", "virtual"), modality, { modality = it },
-            leading = if (modality == "virtual") Icons.Default.Videocam else Icons.Default.LocationOn) {
-            it.replaceFirstChar(Char::titlecase)
-        }
-        val feedback = if (selectedDays.isEmpty()) "Elige al menos un día."
-            else conflict?.conflictMessage() ?: timeError ?: if (submitted) invalid ?: state.error else null
-        feedback?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         Field(location, { location = it.take(160) }, "Lugar o aula (opcional)")
+        val feedback = problem?.takeIf { showProblem } ?: state.error?.takeIf { submitted }
+        feedback?.let { FormProblem(it) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = dismiss) { Text("Cancelar") }
             Button(onClick = {
-                submitted = true
-                if (invalid == null) actions.saveSchedules(draftId, activities)
-            }, enabled = !state.busy && selectedDays.isNotEmpty() && conflict == null,
-                modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
+                if (problem != null) {
+                    showProblem = true
+                } else {
+                    submitted = true
+                    actions.saveSchedules(draftId, activities)
+                }
+            }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
         }
     }
 }
 
+/** One tap per day: all seven days stay visible instead of hiding behind a menu. */
 @Composable
-private fun ScheduleDays(chosen: List<Int>, onSelect: (List<Int>) -> Unit, modifier: Modifier = Modifier) {
-    val summary = when (chosen.size) {
-        0 -> "Elegir días"
-        1 -> days[chosen.single() - 1]
-        in 2..3 -> chosen.joinToString(", ") { days[it - 1].take(3) }
-        7 -> "Todos los días"
-        else -> "${chosen.size} días"
-    }
-    SelectMenuField("Días", summary, modifier) { close ->
-        days.forEachIndexed { index, name ->
-            val day = index + 1
-            val checked = day in chosen
-            SelectMenuItem(name, checked, showCheck = false,
-                leading = { Checkbox(checked = checked, onCheckedChange = null,
-                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary,
-                        uncheckedColor = TextMuted, checkmarkColor = MaterialTheme.colorScheme.onPrimary)) },
-                onClick = { onSelect(if (checked) chosen - day else (chosen + day).sorted()) })
+private fun ScheduleDays(chosen: List<Int>, onSelect: (List<Int>) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Días", color = TextSecondary, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            days.forEachIndexed { index, name ->
+                val day = index + 1
+                val checked = day in chosen
+                val primary = MaterialTheme.colorScheme.primary
+                Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (checked) primary else Color.Transparent)
+                    .border(1.dp, if (checked) primary else CardBorder, RoundedCornerShape(12.dp))
+                    .selectable(checked, role = Role.Checkbox) {
+                        onSelect(if (checked) chosen - day else (chosen + day).sorted())
+                    }
+                    .semantics { contentDescription = name },
+                    contentAlignment = Alignment.Center) {
+                    Text(dayLetters[index], fontWeight = FontWeight.SemiBold,
+                        color = if (checked) MaterialTheme.colorScheme.onPrimary else TextSecondary)
+                }
+            }
         }
-        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = CardBorder)
-        DropdownMenuItem(text = { Text("Listo", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, onClick = close)
     }
 }
 
@@ -772,6 +790,19 @@ private fun <T> ScheduleChoice(
         choices.forEach { choice ->
             SelectMenuItem(name(choice), choice == selected, onClick = { onSelect(choice); close() })
         }
+    }
+}
+
+/** A single, calm notice shown next to the save action instead of live red text. */
+@Composable
+private fun FormProblem(message: String) {
+    val error = MaterialTheme.colorScheme.error
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(error.copy(alpha = .08f))
+        .semantics { liveRegion = LiveRegionMode.Polite }
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = error)
+        Text(message, color = error, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1050,11 +1081,12 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
         exact = com.example.findme.reminders.ActivityReminders.exactAllowed(context)
     }
     val nearAlerts = with(state.settings) { activities || statuses || messages || reminders }
+    var accountSheet by remember { mutableStateOf<AccountSheet?>(null) }
     PageHeading("", "Perfil y ajustes", "")
-    Panel {
-        SectionHeading(Icons.Default.PersonOutline, state.profile?.displayName.orEmpty(), state.profile?.timezone)
-        ProfileNameForm(state, actions)
+    state.profile?.let { profile ->
+        ProfileHeader(profile, enabled = !state.busy) { accountSheet = AccountSheet.Profile }
     }
+    SettingsGroupLabel("Preferencias")
     Panel {
         SectionHeading(Icons.Default.NotificationsNone, "Notificaciones")
         Surface(shape = RoundedCornerShape(16.dp), color = AppBackground.copy(alpha = .35f), border = BorderStroke(1.dp, CardBorder)) {
@@ -1097,16 +1129,38 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
     }
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AppAccent.entries.forEach { accent ->
-                ChoiceChip(accent.label, state.settings.accent == accent, onClick = { actions.setAccent(accent) },
-                    modifier = Modifier.weight(1f),
-                    leading = { Box(Modifier.size(12.dp).background(brandAccent(accent), CircleShape)) })
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppTheme.entries.forEach { theme ->
+                ThemeOption(theme, state.settings.theme == theme, Modifier.weight(1f)) { actions.setTheme(theme) }
+            }
+        }
+    }
+    val scope = rememberCoroutineScope()
+    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val data = actions.exportData()
+        if (uri == null || data == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val saved = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(data.toByteArray()) } != null }.getOrDefault(false)
+            }
+            actions.exportFinished(saved)
+        }
+    }
+    SettingsGroupLabel("Cuenta")
+    Panel {
+        SectionHeading(Icons.Default.PrivacyTip, "Privacidad y seguridad",
+            "Tu horario y tus estados solo los ven las personas que conectes.")
+        Column {
+            SettingsRow(Icons.Default.Lock, "Cambiar contraseña", enabled = !state.busy) { accountSheet = AccountSheet.Password }
+            HorizontalDivider(color = CardBorder)
+            SettingsRow(Icons.Default.Download, "Exportar mis datos", enabled = !state.busy && state.profile != null) {
+                exportLauncher.launch("near-${state.profile?.username ?: "datos"}.json")
             }
         }
     }
     Panel {
-        SectionHeading(Icons.Default.SystemUpdate, "Actualizaciones", "Near ${BuildConfig.VERSION_NAME}")
+        SectionHeading(Icons.Default.Info, "Acerca de Near", "Versión ${BuildConfig.VERSION_NAME}")
         Text(updates.message, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
         OutlinedButton(onClick = onCheckUpdates, enabled = !updates.checking && !updates.downloading, modifier = Modifier.fillMaxWidth()) {
             if (updates.checking) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -1120,30 +1174,8 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
             Text("Actualizar ahora")
         }
     }
-    var accountSheet by remember { mutableStateOf<AccountSheet?>(null) }
-    val scope = rememberCoroutineScope()
-    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val data = actions.exportData()
-        if (uri == null || data == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val saved = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(data.toByteArray()) } != null }.getOrDefault(false)
-            }
-            actions.exportFinished(saved)
-        }
-    }
     Panel {
-        SectionHeading(Icons.Default.PrivacyTip, "Tu privacidad")
-        Text("Tu horario y tus estados solo se comparten con las personas que conectes. Puedes retirar la conexión desde Personas.",
-            color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
         Column {
-            SettingsRow(Icons.Default.Lock, "Cambiar contraseña", enabled = !state.busy) { accountSheet = AccountSheet.Password }
-            HorizontalDivider(color = CardBorder)
-            SettingsRow(Icons.Default.Download, "Exportar mis datos", enabled = !state.busy && state.profile != null) {
-                exportLauncher.launch("near-${state.profile?.username ?: "datos"}.json")
-            }
-            HorizontalDivider(color = CardBorder)
             SettingsRow(Icons.AutoMirrored.Filled.Logout, "Cerrar sesión", enabled = !state.busy, chevron = false, onClick = actions::logout)
             HorizontalDivider(color = CardBorder)
             SettingsRow(Icons.Default.DeleteForever, "Eliminar mi cuenta", enabled = !state.busy,
@@ -1151,13 +1183,53 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
         }
     }
     when (accountSheet) {
+        AccountSheet.Profile -> EditProfileSheet(state, actions) { accountSheet = null }
         AccountSheet.Password -> ChangePasswordSheet(state, actions) { accountSheet = null }
         AccountSheet.Delete -> DeleteAccountSheet(state, actions) { accountSheet = null }
         null -> Unit
     }
 }
 
-private enum class AccountSheet { Password, Delete }
+private enum class AccountSheet { Profile, Password, Delete }
+
+/** Avatar, name and handle at the top of the profile, with a single entry point to edit them. */
+@Composable
+private fun ProfileHeader(profile: AccountProfile, enabled: Boolean, onEdit: () -> Unit) {
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ProfileAvatar(profile.displayName, Modifier.size(64.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(profile.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                profile.username?.let { Text("@$it", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Default.Public, null, Modifier.size(14.dp), tint = TextMuted)
+                    Text(profile.timezone, color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        OutlinedButton(onClick = onEdit, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Edit, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Editar perfil")
+        }
+    }
+}
+
+/** Small uppercase label that groups the settings cards below it. */
+@Composable
+private fun SettingsGroupLabel(text: String) {
+    Text(text.uppercase(), Modifier.padding(start = 4.dp, top = 6.dp), color = TextMuted,
+        style = MaterialTheme.typography.labelMedium, letterSpacing = 1.2.sp)
+}
+
+@Composable
+private fun EditProfileSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    var submitted by remember { mutableStateOf(false) }
+    CloseWhenDone(state, submitted, dismiss) { submitted = false }
+    Sheet(dismiss, "Editar perfil", "Tu gente te verá con este nombre.") {
+        ProfileNameForm(state, actions, onSubmit = { submitted = true })
+        if (submitted) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
 
 /** Closes a sheet once its own request finishes without an error. */
 @Composable
@@ -1229,6 +1301,38 @@ private fun SettingsRow(icon: ImageVector, label: String, enabled: Boolean = tru
     }
 }
 
+/** A theme card with a small preview drawn in that theme's own colours. */
+@Composable
+private fun ThemeOption(theme: AppTheme, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val preview = if (theme == AppTheme.Light) LightPalette else DarkPalette
+    val primary = MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.clip(shape).border(if (selected) 2.dp else 1.dp, if (selected) primary else CardBorder, shape)
+        .selectable(selected, role = Role.RadioButton, onClick = onClick).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(10.dp)).background(preview.background)
+            .padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp)).background(preview.card)
+                .border(1.dp, preview.cardBorder, RoundedCornerShape(6.dp)).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(14.dp).background(preview.accent, CircleShape))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(width = 44.dp, height = 5.dp).background(preview.textPrimary, CircleShape))
+                    Box(Modifier.size(width = 28.dp, height = 4.dp).background(preview.textMuted, CircleShape))
+                }
+            }
+            Box(Modifier.size(width = 36.dp, height = 8.dp).background(preview.accent, CircleShape))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(if (theme == AppTheme.Light) Icons.Default.LightMode else Icons.Default.DarkMode, null,
+                Modifier.size(18.dp), tint = if (selected) primary else TextSecondary)
+            Text(theme.label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                color = if (selected) primary else TextPrimary)
+            if (selected) Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp), tint = primary)
+        }
+    }
+}
+
 /** A status line with a coloured dot: green when everything is fine, red when something needs attention. */
 @Composable
 private fun StatusLine(text: String, on: Boolean, problem: Boolean = false) {
@@ -1277,7 +1381,7 @@ private fun CardAction(icon: ImageVector, label: String, enabled: Boolean, modif
 @Composable
 private fun EmptyPanel(icon: ImageVector, title: String, description: String) {
     Panel {
-        AccentIcon(icon, cyan)
+        AccentIcon(icon, BrandSky)
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(description, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }

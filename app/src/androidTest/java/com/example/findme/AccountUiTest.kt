@@ -54,10 +54,10 @@ class AccountUiTest {
     @Test fun brandScreensAcrossNavigationAndAppearance() {
         val current = mutableStateOf(state)
         compose.setContent {
-            NearTheme(accent = current.value.settings.accent) {
+            NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
-                    override fun setAccent(accent: com.example.findme.data.local.AppAccent) {
-                        current.value = current.value.copy(settings = current.value.settings.copy(accent = accent))
+                    override fun setTheme(theme: com.example.findme.data.local.AppTheme) {
+                        current.value = current.value.copy(settings = current.value.settings.copy(theme = theme))
                     }
                 })
             }
@@ -73,9 +73,9 @@ class AccountUiTest {
         compose.onNodeWithText("Perfil").performClick()
         screenshot("brand-profile", composeOnly = true)
         compose.onNodeWithText("Apariencia").performScrollTo()
-        compose.onNodeWithText("Menta").performScrollTo().performClick()
+        compose.onNodeWithText("Claro").performScrollTo().performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Menta").assertIsSelected()
+        compose.onNodeWithText("Claro").assertIsSelected()
         screenshot("brand-appearance", composeOnly = true)
         current.value = AccountState(initializing = false)
         compose.onNodeWithText("Qué bueno verte.").assertIsDisplayed()
@@ -130,7 +130,7 @@ class AccountUiTest {
                     savedModality = it.modality
                     assertEquals("university", it.category)
                     assertEquals("21:01", it.startTime)
-                    assertEquals("22:00", it.endTime)
+                    assertEquals("22:01", it.endTime)
                 }
             }
         }, snapshot = state.copy(schedules = listOf(schedule, work)))
@@ -145,28 +145,30 @@ class AccountUiTest {
         }
         listOf("30 min", "1 h", "90 min").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
         compose.onNodeWithText("Título").performTextInput("Nuevo proyecto")
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Coincide con «Proyecto de investigación»", substring = true).assertExists()
+        // Conflicts stay hidden while editing and only appear after trying to save.
+        val conflict = compose.onNodeWithText("Coincide con «Proyecto de investigación»", substring = true)
+        conflict.assertDoesNotExist()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsEnabled().performClick()
+        conflict.assertExists()
+        assertEquals("", savedTitle)
         compose.onNodeWithText("Tipo").performScrollTo().performClick()
         compose.onNodeWithText("Trabajo").performClick()
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
+        conflict.assertDoesNotExist()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().performClick()
+        conflict.assertExists()
         compose.onNodeWithText("Tipo").performScrollTo().performClick()
         compose.onNode(hasText("Universidad") and hasClickAction()).performClick()
         // Use a work activity on a different day to check the allowed pairing.
         val dayLabels = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
-        val dayField = compose.onNodeWithText("Días")
-        dayField.performScrollTo().performClick()
-        compose.onNode(hasText(dayLabels[otherDay - 1]) and hasClickAction()).performScrollTo().performClick()
-        compose.onNode(hasText(dayLabels[thirdDay - 1]) and hasClickAction()).performScrollTo().performClick()
-        compose.onNodeWithText("Listo").performScrollTo().performClick()
+        compose.onNodeWithContentDescription(dayLabels[otherDay - 1]).performScrollTo().performClick()
+        compose.onNodeWithContentDescription(dayLabels[thirdDay - 1]).performScrollTo().performClick()
         compose.onNodeWithText("Modalidad").performScrollTo().performClick()
         compose.onNodeWithText("Virtual").performClick()
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().performClick()
+        assertEquals("", savedTitle)
         compose.onNodeWithText("Coincide con «Proyecto de investigación» el ${dayLabels[now.dayOfWeek.value - 1]}",
             substring = true, ignoreCase = true).assertExists()
-        dayField.performScrollTo().performClick()
-        compose.onNode(hasText(dayLabels[now.dayOfWeek.value - 1]) and hasClickAction() and isSelected()).performScrollTo().performClick()
-        compose.onNodeWithText("Listo").performScrollTo().performClick()
+        compose.onNode(hasContentDescription(dayLabels[now.dayOfWeek.value - 1]) and isSelected()).performScrollTo().performClick()
         compose.onNodeWithText("Inicio").performScrollTo().performClick()
         compose.onNodeWithText("Hora de inicio").assertIsDisplayed()
         compose.onNodeWithText("01").performClick()
@@ -307,6 +309,7 @@ class AccountUiTest {
         var saved = ""
         show(object : AccountActions { override fun saveProfile(name: String, username: String) { saved = name } })
         compose.onNodeWithText("Perfil").performClick()
+        compose.onNodeWithText("Editar perfil").performScrollTo().performClick()
         compose.onNodeWithText("Guardar perfil").assertIsNotEnabled()
         compose.onNodeWithText("Nombre visible").performTextReplacement("Miguel")
         compose.onNodeWithText("Guardar perfil").performScrollTo().performClick()
@@ -412,17 +415,17 @@ class AccountUiTest {
         assertTrue(finished)
     }
 
-    @Test fun profileRestoresSettingsAndChangesAccent() {
+    @Test fun profileRestoresSettingsAndChangesTheme() {
         val current = androidx.compose.runtime.mutableStateOf(state)
         compose.setContent {
-            NearTheme(accent = current.value.settings.accent) {
+            NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
                     override fun setAlert(alert: com.example.findme.data.local.AccountAlert, enabled: Boolean) {
                         assertEquals(com.example.findme.data.local.AccountAlert.Messages, alert)
                         current.value = current.value.copy(settings = current.value.settings.copy(messages = enabled))
                     }
-                    override fun setAccent(accent: com.example.findme.data.local.AppAccent) {
-                        current.value = current.value.copy(settings = current.value.settings.copy(accent = accent))
+                    override fun setTheme(theme: com.example.findme.data.local.AppTheme) {
+                        current.value = current.value.copy(settings = current.value.settings.copy(theme = theme))
                     }
                 })
             }
@@ -431,10 +434,10 @@ class AccountUiTest {
         compose.onNodeWithText("Mensajes recibidos").performScrollTo().assertIsOn().performClick()
         compose.onNodeWithText("Mensajes recibidos").assertIsOff()
         screenshot("account-profile-notifications-compose", composeOnly = true)
-        compose.onNodeWithText("Menta").performScrollTo().assertIsDisplayed().performClick()
-        compose.onNodeWithText("Menta").assertIsSelected()
-        assertEquals(com.example.findme.data.local.AppAccent.Mint, current.value.settings.accent)
-        screenshot("account-profile-mint-compose", composeOnly = true)
+        compose.onNodeWithText("Claro").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Claro").assertIsSelected()
+        assertEquals(com.example.findme.data.local.AppTheme.Light, current.value.settings.theme)
+        screenshot("account-profile-light-compose", composeOnly = true)
         compose.onNodeWithText("Buscar actualizaciones").performScrollTo().assertIsDisplayed()
     }
 

@@ -37,8 +37,8 @@ import com.example.findme.ui.theme.*
 /** Corner radius shared by every text field, select field and menu so forms read as one system. */
 val FieldShape = RoundedCornerShape(16.dp)
 private val MenuShape = RoundedCornerShape(18.dp)
-private val FieldContainer = AppBackground.copy(alpha = .35f)
-private val FieldContainerFocused = AppBackground.copy(alpha = .55f)
+private val FieldContainer: Color @Composable @ReadOnlyComposable get() = AppBackground.copy(alpha = .35f)
+private val FieldContainerFocused: Color @Composable @ReadOnlyComposable get() = AppBackground.copy(alpha = .55f)
 
 /** Colours for every [OutlinedTextField] in the app; keeps borders, labels and icons consistent. */
 @Composable
