@@ -133,6 +133,11 @@ fun AccountContent(state: AccountState, actions: AccountActions,
         }
         return
     }
+    // A recovery link already signed in; nothing of the account opens until the new password is saved.
+    if (state.signedIn && state.passwordRecovery) {
+        NewPasswordPage(state, actions)
+        return
+    }
     var tab by rememberSaveable(state.signedIn) { mutableStateOf("Mi día") }
     LaunchedEffect(state.peopleRevision, state.signedIn) { if (state.peopleRevision > 0 && state.signedIn) tab = "Personas" }
     LaunchedEffect(state.scheduleRevision, state.signedIn) { if (state.scheduleRevision > 0 && state.signedIn) tab = "Horario" }
@@ -219,33 +224,74 @@ fun AccountContent(state: AccountState, actions: AccountActions,
     if (!state.signedIn && state.confirmationEmail == null) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
         .windowInsetsBottomHeight(WindowInsets.navigationBars).background(LoginPanel))
     }
-    if (state.passwordRecovery && state.signedIn) NewPasswordSheet(state, actions)
 }
 
-/** Shown after a recovery link signs the person in, to choose the new password. */
+/**
+ * Shown after a recovery link signs the person in. It fills the screen and has no way around it:
+ * either the new password is saved or the person signs out, so the link never replaces the password.
+ */
 @Composable
-private fun NewPasswordSheet(state: AccountState, actions: AccountActions) {
+private fun NewPasswordPage(state: AccountState, actions: AccountActions) {
     var password by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
-    var visible by remember { mutableStateOf(false) }
-    Sheet(actions::cancelPasswordRecovery, "Elige una contraseña nueva", "De 8 a 128 caracteres. La usarás junto con tu nombre de usuario para entrar.") {
-        listOf("Nueva contraseña" to password, "Confirmar contraseña" to confirmation).forEachIndexed { index, (label, value) ->
-            OutlinedTextField(value, { if (index == 0) password = it.take(128) else confirmation = it.take(128) },
-                label = { Text(label) }, singleLine = true, enabled = !state.busy,
-                isError = index == 1 && confirmation.isNotEmpty() && confirmation != password,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = { IconButton(onClick = { visible = !visible }) {
-                    Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Ocultar contraseña" else "Mostrar contraseña")
-                } }, shape = FieldShape, modifier = Modifier.fillMaxWidth(), colors = nearTextFieldColors())
-        }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { actions.setRecoveredPassword(password, confirmation) },
-            enabled = !state.busy && password.length in 8..128 && password == confirmation, modifier = Modifier.fillMaxWidth()) {
-            Text(if (state.busy) "Guardando…" else "Guardar contraseña")
+    var visible by rememberSaveable { mutableStateOf(false) }
+    val mismatch = confirmation.isNotEmpty() && confirmation != password
+    val toggle: @Composable () -> Unit = {
+        IconButton(onClick = { visible = !visible }) {
+            Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Ocultar contraseña" else "Mostrar contraseña")
         }
     }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(AppSurface, AppBackground), endY = 1400f))) {
+        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding()) {
+            val viewport = maxHeight
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding()
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp)) {
+                LoginStage(viewport) {
+                    Text("Elige una contraseña nueva", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                        color = TextPrimary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("Guárdala para terminar de recuperar tu cuenta. De 8 a 128 caracteres; la usarás con tu nombre de usuario para entrar.",
+                        color = TextSecondary, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+                    Field(password, { password = it.take(128) }, "Nueva contraseña", leading = Icons.Default.Lock,
+                        keyboard = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                        hidden = !visible, trailing = toggle, enabled = !state.busy)
+                    Field(confirmation, { confirmation = it.take(128) }, "Confirmar contraseña", leading = Icons.Default.Lock,
+                        keyboard = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                        hidden = !visible, trailing = toggle, enabled = !state.busy, isError = mismatch)
+                    Text(state.error ?: if (mismatch) "Las contraseñas no coinciden." else "Hasta que la guardes no se abrirá tu cuenta.",
+                        color = if (state.error != null || mismatch) MaterialTheme.colorScheme.error else TextMuted,
+                        style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { actions.setRecoveredPassword(password, confirmation) },
+                        enabled = !state.busy && password.length in 8..128 && password == confirmation,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(52.dp), shape = RoundedCornerShape(18.dp)) {
+                        Text(if (state.busy) "Guardando…" else "Guardar contraseña", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = actions::cancelPasswordRecovery, enabled = !state.busy, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Cancelar y cerrar sesión", color = TextSecondary)
+                    }
+                }
+            }
+        }
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .windowInsetsBottomHeight(WindowInsets.navigationBars).background(LoginPanel))
+    }
 }
+
+/** Seconds until an email of the same kind can be sent again; 0 when it can be sent now. */
+@Composable
+private fun resendSecondsLeft(sentAt: Long?): Int {
+    if (sentAt == null) return 0
+    var now by remember(sentAt) { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(sentAt) {
+        while (now - sentAt < EMAIL_RESEND_SECONDS * 1000L) {
+            delay(1000 - (now - sentAt) % 1000)
+            now = android.os.SystemClock.elapsedRealtime()
+        }
+    }
+    return ((EMAIL_RESEND_SECONDS * 1000L - (now - sentAt) + 999) / 1000).toInt().coerceAtLeast(0)
+}
+
+private fun countdown(seconds: Int) = "%d:%02d".format(Locale.ROOT, seconds / 60, seconds % 60)
 
 @Composable
 private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
@@ -296,8 +342,9 @@ private fun LoginForm(state: AccountState, actions: AccountActions, viewport: Dp
             Button(onClick = { mode = "login"; actions.finishRegistration() }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                 Text("Ya confirmé, iniciar sesión")
             }
-            OutlinedButton(onClick = { actions.resendConfirmation(pendingEmail) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-                Text("Reenviar confirmación")
+            val wait = resendSecondsLeft(state.confirmationSentAt)
+            OutlinedButton(onClick = { actions.resendConfirmation(pendingEmail) }, enabled = !state.busy && wait == 0, modifier = Modifier.fillMaxWidth()) {
+                Text(if (wait > 0) "Reenviar confirmación en ${countdown(wait)}" else "Reenviar confirmación")
             }
         }
         return
@@ -345,13 +392,26 @@ private fun LoginForm(state: AccountState, actions: AccountActions, viewport: Dp
             resending -> Registration.isEmail(email)
             else -> Username.isValid(username) && password.isNotBlank()
         }
+        // Sending another link right away would hit the server's limit; count down to when it is allowed.
+        val sent = state.recoveryEmailSent?.takeIf { recovering }
+        val wait = when {
+            recovering -> resendSecondsLeft(sent?.at)
+            mode == "resend" -> resendSecondsLeft(state.confirmationSentAt)
+            else -> 0
+        }
+        if (sent != null) Text("Enviamos el enlace a ${sent.address}. Ábrelo en este teléfono y revisa también la carpeta de spam.",
+            color = TextSecondary, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         Button(onClick = {
             when { registering -> actions.register(name, email, username, password, confirmation)
                 recovering -> actions.requestPasswordReset(email)
                 resending -> actions.resendConfirmation(email)
                 else -> actions.login(username, password) }
-        }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(52.dp), enabled = !state.busy && valid, shape = RoundedCornerShape(18.dp)) {
-            Text(when { state.busy -> "Un momento…"; registering -> "Registrarme"; recovering -> "Enviar enlace"; resending -> "Enviar confirmación"; else -> "Entrar" },
+        }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(52.dp), enabled = !state.busy && valid && wait == 0, shape = RoundedCornerShape(18.dp)) {
+            Text(when { state.busy -> "Un momento…"; registering -> "Registrarme"
+                wait > 0 -> "Reenviar en ${countdown(wait)}"
+                recovering -> if (sent != null) "Reenviar enlace" else "Enviar enlace"
+                resending -> "Enviar confirmación"; else -> "Entrar" },
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
         if (mode == "login") TextButton(onClick = { mode = "recover"; password = ""; passwordVisible = false }, enabled = !state.busy, modifier = Modifier.align(Alignment.CenterHorizontally)) {
