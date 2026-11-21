@@ -60,6 +60,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,7 +100,6 @@ import kotlinx.coroutines.withContext
 import com.example.findme.R
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.GenericShape
 
@@ -176,6 +176,9 @@ fun AccountContent(state: AccountState, actions: AccountActions,
         }
     }) { padding ->
         Crossfade(tab, modifier = Modifier.fillMaxSize().padding(padding), label = "accountNavigation") { activeTab ->
+            // The visible height lets the sign-in panel fill the screen exactly instead of overflowing it.
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+            val viewport = maxHeight
             Column(Modifier.fillMaxSize()
                 .verticalScroll(rememberScrollState()).imePadding()
                 .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -194,7 +197,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
                     )
                     TextButton(onClick = actions::refresh, enabled = !state.busy) { Text("Reintentar sincronización") }
                 }
-                if (!state.signedIn) LoginForm(state, actions)
+                if (!state.signedIn) LoginForm(state, actions, viewport)
                 else if (state.profile == null) {
                     Panel {
                         if (!state.syncIssue) Text("Cargando tu perfil…", color = TextSecondary)
@@ -209,8 +212,12 @@ fun AccountContent(state: AccountState, actions: AccountActions,
                     else -> AccountProfilePanel(state, actions, updates, onCheckUpdates, onInstallUpdate)
                 }
             }
+            }
         }
     }
+    // The sign-in panel runs to the bottom edge, so the navigation bar area takes its colour too.
+    if (!state.signedIn && state.confirmationEmail == null) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+        .windowInsetsBottomHeight(WindowInsets.navigationBars).background(LoginPanel))
     }
     if (state.passwordRecovery && state.signedIn) NewPasswordSheet(state, actions)
 }
@@ -270,7 +277,7 @@ private fun SectionHeading(icon: ImageVector, title: String, subtitle: String? =
 }
 
 @Composable
-private fun LoginForm(state: AccountState, actions: AccountActions) {
+private fun LoginForm(state: AccountState, actions: AccountActions, viewport: Dp) {
     var mode by rememberSaveable(state.loginRevision) { mutableStateOf("login") }
     var username by rememberSaveable { mutableStateOf("") }
     var name by rememberSaveable { mutableStateOf("") }
@@ -310,7 +317,7 @@ private fun LoginForm(state: AccountState, actions: AccountActions) {
                 if (passwordVisible) "Ocultar contraseña" else "Mostrar contraseña")
         }
     }
-    LoginStage {
+    LoginStage(viewport) {
         Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TextPrimary,
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodyMedium,
@@ -375,17 +382,21 @@ private val LedgeShape = GenericShape { size, _ ->
 
 /** The mascot peeking over the arched panel: head behind it, paws resting on it, the form inside. */
 @Composable
-private fun LoginStage(content: @Composable ColumnScope.() -> Unit) {
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    // Bleed past the screen's 20dp padding so the panel reaches both edges and the bottom.
+private fun LoginStage(viewport: Dp, content: @Composable ColumnScope.() -> Unit) {
+    // Fill what is left of the visible area: the page's 8dp top padding and the 116dp the mascot takes
+    // above the panel (the panel covers the 28dp bottom padding itself). Only taller forms, such as
+    // registration, then need to scroll.
+    val panelMin = (viewport - 8.dp - 116.dp).coerceAtLeast(0.dp)
+    // Bleed past the screen's 20dp side and 28dp bottom padding so the panel reaches both edges and the bottom.
     Box(Modifier.fillMaxWidth().layout { measurable, constraints ->
         val side = 20.dp.roundToPx()
+        val bottom = 28.dp.roundToPx()
         val placeable = measurable.measure(constraints.copy(minWidth = constraints.maxWidth + 2 * side, maxWidth = constraints.maxWidth + 2 * side))
-        layout(constraints.maxWidth, placeable.height - side) { placeable.place(-side, 0) }
+        layout(constraints.maxWidth, placeable.height - bottom) { placeable.place(-side, 0) }
     }) {
         Image(painterResource(R.drawable.near_mascot_head), null,
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(176.dp, 128.dp))
-        Column(Modifier.padding(top = 116.dp).fillMaxWidth().heightIn(min = screenHeight - 190.dp)
+        Column(Modifier.padding(top = 116.dp).fillMaxWidth().heightIn(min = panelMin)
             .background(LoginPanel, LedgeShape).padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
         Image(painterResource(R.drawable.near_mascot_paws), null,
