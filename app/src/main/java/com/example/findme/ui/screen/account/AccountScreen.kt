@@ -45,7 +45,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -679,11 +682,12 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             title = title.trim(), location = location.trim(), category = category, modality = modality,
             endsNextDay = endsNextDay)
     }
-    val invalid = selectedDays.firstOrNull()?.let { validateSchedule(it, start, end, title, endsNextDay) }
-    val conflict = if (invalid == null) {
-        activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }
-    } else null
-    val timeError = validateSchedule(1, start, end, "Actividad", endsNextDay)
+    // Problems are only reported after a save attempt, so editing never flashes errors mid-way.
+    val problem = if (selectedDays.isEmpty()) "Elige al menos un día."
+        else validateSchedule(selectedDays.first(), start, end, title, endsNextDay)
+            ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
+    var showProblem by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality) { showProblem = false }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
         if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
     }
@@ -717,18 +721,20 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
             leading = if (modality == "virtual") Icons.Default.Videocam else Icons.Default.LocationOn) {
             it.replaceFirstChar(Char::titlecase)
         }
-        val feedback = if (selectedDays.isEmpty()) "Elige al menos un día."
-            else conflict?.conflictMessage() ?: timeError ?: if (submitted) invalid ?: state.error else null
-        feedback?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         Field(location, { location = it.take(160) }, "Lugar o aula (opcional)")
+        val feedback = problem?.takeIf { showProblem } ?: state.error?.takeIf { submitted }
+        feedback?.let { FormProblem(it) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = dismiss) { Text("Cancelar") }
             Button(onClick = {
-                submitted = true
-                if (invalid == null) actions.saveSchedules(draftId, activities)
-            }, enabled = !state.busy && selectedDays.isNotEmpty() && conflict == null,
-                modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
+                if (problem != null) {
+                    showProblem = true
+                } else {
+                    submitted = true
+                    actions.saveSchedules(draftId, activities)
+                }
+            }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Guardar actividad") }
         }
     }
 }
@@ -772,6 +778,19 @@ private fun <T> ScheduleChoice(
         choices.forEach { choice ->
             SelectMenuItem(name(choice), choice == selected, onClick = { onSelect(choice); close() })
         }
+    }
+}
+
+/** A single, calm notice shown next to the save action instead of live red text. */
+@Composable
+private fun FormProblem(message: String) {
+    val error = MaterialTheme.colorScheme.error
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(error.copy(alpha = .08f))
+        .semantics { liveRegion = LiveRegionMode.Polite }
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = error)
+        Text(message, color = error, style = MaterialTheme.typography.bodySmall)
     }
 }
 

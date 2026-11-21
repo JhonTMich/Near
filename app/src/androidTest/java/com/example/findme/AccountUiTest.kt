@@ -145,11 +145,17 @@ class AccountUiTest {
         }
         listOf("30 min", "1 h", "90 min").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
         compose.onNodeWithText("Título").performTextInput("Nuevo proyecto")
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Coincide con «Proyecto de investigación»", substring = true).assertExists()
+        // Conflicts stay hidden while editing and only appear after trying to save.
+        val conflict = compose.onNodeWithText("Coincide con «Proyecto de investigación»", substring = true)
+        conflict.assertDoesNotExist()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsEnabled().performClick()
+        conflict.assertExists()
+        assertEquals("", savedTitle)
         compose.onNodeWithText("Tipo").performScrollTo().performClick()
         compose.onNodeWithText("Trabajo").performClick()
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
+        conflict.assertDoesNotExist()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().performClick()
+        conflict.assertExists()
         compose.onNodeWithText("Tipo").performScrollTo().performClick()
         compose.onNode(hasText("Universidad") and hasClickAction()).performClick()
         // Use a work activity on a different day to check the allowed pairing.
@@ -161,7 +167,8 @@ class AccountUiTest {
         compose.onNodeWithText("Listo").performScrollTo().performClick()
         compose.onNodeWithText("Modalidad").performScrollTo().performClick()
         compose.onNodeWithText("Virtual").performClick()
-        compose.onNodeWithText("Guardar actividad").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Guardar actividad").performScrollTo().performClick()
+        assertEquals("", savedTitle)
         compose.onNodeWithText("Coincide con «Proyecto de investigación» el ${dayLabels[now.dayOfWeek.value - 1]}",
             substring = true, ignoreCase = true).assertExists()
         dayField.performScrollTo().performClick()
