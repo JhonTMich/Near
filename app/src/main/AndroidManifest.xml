@@ -75,6 +75,8 @@
         </service>
 
         <receiver android:name=".reminders.ReminderReceiver" android:exported="false" />
+        <!-- Replies typed in a message notification. Only Android delivers the PendingIntent. -->
+        <receiver android:name=".push.MessageReplyReceiver" android:exported="false" />
         <receiver android:name=".reminders.RemindersRescheduleReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

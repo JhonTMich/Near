@@ -309,7 +309,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 val newSignals = messageNotifications.update(id, signals, current.settings.messages)
                 current.controls.notifiable(newSignals).forEach { signal ->
                     val sender = profiles.find { it.id == signal.senderId }?.let(current.controls::nameOf) ?: "Tu gente"
-                    NotificationHelper.showMessageNotification(getApplication(), signal.id, sender, signal.message)
+                    NotificationHelper.showMessageNotification(getApplication(), signal.id, sender, signal.message,
+                        NotificationHelper.Reply(id, signal.senderId, messages.map { it.message }.filter { it.trim().length in 1..240 }.distinct().take(5)))
                 }
             }
             if (complete || previous != null) saveCurrentCache()
