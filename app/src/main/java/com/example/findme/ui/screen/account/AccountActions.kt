@@ -41,6 +41,10 @@ interface AccountActions {
     fun addAutoPlace(label: String) {}
     fun removeAutoPlace(id: String) {}
     fun refreshAutoPlaces() {}
+    /** Creates the group when [id] is null, or renames it; its members become exactly [members]. */
+    fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) {}
+    fun deleteGroup(id: String) {}
+    fun sendToGroup(groupId: String, message: QuickMessage) {}
     fun setStatus(text: String, minutes: Long) {}
     fun clearStatus() {}
     fun invite() {}

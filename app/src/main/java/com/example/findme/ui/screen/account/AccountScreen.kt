@@ -506,7 +506,8 @@ private fun profileClock(zone: ZoneId): ZonedDateTime {
 }
 
 @Composable
-private fun contactStatus(person: AccountProfile, state: AccountState): UserCurrentStatus {
+private fun contactStatus(person: AccountProfile, state: AccountState,
+    schedules: List<ScheduleDto> = state.personSchedules, statuses: List<StatusOverrideDto> = state.personStatuses): UserCurrentStatus {
     val visibility = state.incomingVisibility[person.id]
         ?: return UserCurrentStatus.Error("Datos desactualizados. Actualiza para ver qué comparte.", person.displayName)
     if (!visibility.sharesSchedule && !visibility.sharesStatus) {
@@ -518,8 +519,8 @@ private fun contactStatus(person: AccountProfile, state: AccountState): UserCurr
     }
     val now = profileClock(person.zone())
     val status = StatusRepository.calculateStatus(person.displayName,
-        state.personSchedules.takeIf { visibility.sharesSchedule }.orEmpty(),
-        state.personStatuses.takeIf { visibility.sharesStatus }.orEmpty(), now.dayOfWeek.value, now)
+        schedules.takeIf { visibility.sharesSchedule }.orEmpty(),
+        statuses.takeIf { visibility.sharesStatus }.orEmpty(), now.dayOfWeek.value, now)
     return if (!visibility.sharesSchedule && status is UserCurrentStatus.FreeTime) {
         UserCurrentStatus.Error("Horario privado. No hay un estado compartido en este momento.", person.displayName)
     } else status
@@ -1228,6 +1229,10 @@ private fun People(state: AccountState, actions: AccountActions) {
     var manageMessages by rememberSaveable { mutableStateOf(false) }
     var disconnect by remember { mutableStateOf<PersonConnection?>(null) }
     var manageConnection by remember { mutableStateOf<PersonConnection?>(null) }
+    var selectedGroup by rememberSaveable { mutableStateOf<String?>(null) }
+    var groupEditor by rememberSaveable { mutableStateOf(false) }
+    var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
+    if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
     PageHeading("", "Tu gente", "")
     state.lastSync?.let { updated ->
@@ -1240,13 +1245,20 @@ private fun People(state: AccountState, actions: AccountActions) {
     if (state.connections.isEmpty()) EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
     else {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            state.groups.sortedBy { it.name.lowercase() }.forEach { group ->
+                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy,
+                    leading = { Icon(Icons.Default.Groups, null, Modifier.size(18.dp)) })
+            }
             state.connections.forEach { connection ->
                 state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }?.let { person ->
-                    ChoiceChip(controls.nameOf(person), state.selectedPerson?.id == person.id, onClick = { actions.selectPerson(person) },
+                    ChoiceChip(controls.nameOf(person), selectedGroup == null && state.selectedPerson?.id == person.id,
+                        onClick = { selectedGroup = null; actions.selectPerson(person) },
                         enabled = !state.busy,
                         leading = { Icon(if (controls.isMuted(person.id)) Icons.Default.NotificationsOff else Icons.Default.PersonOutline, null, Modifier.size(18.dp)) })
                 }
             }
+            ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
+                leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
     }
     if (state.signals.isNotEmpty()) Panel {
@@ -1257,7 +1269,11 @@ private fun People(state: AccountState, actions: AccountActions) {
         }
     }
     PlansPanel(state, actions)
-    state.selectedPerson?.let { selected ->
+    state.groups.find { it.id == selectedGroup }?.let { group ->
+        GroupPanel(group, state, actions, onEdit = { editingGroup = group; groupEditor = true })
+    }
+    if (groupEditor) GroupEditor(editingGroup, state, actions) { groupEditor = false }
+    if (selectedGroup == null) state.selectedPerson?.let { selected ->
         val person = selected.copy(displayName = controls.nameOf(selected))
         val visibility = state.incomingVisibility[person.id]
         key(person.id) {
@@ -1348,6 +1364,94 @@ private fun People(state: AccountState, actions: AccountActions) {
     }
     disconnect?.let { connection -> Confirm("¿Desvincular persona?", "Ambos dejarán de ver el horario y estado del otro.",
         { disconnect = null }, { actions.disconnect(connection.id); disconnect = null }) }
+}
+
+/** What everyone in a group is doing now, and a message for all of them. */
+@Composable
+private fun GroupPanel(group: PersonGroup, state: AccountState, actions: AccountActions, onEdit: () -> Unit) {
+    var sending by rememberSaveable(group.id) { mutableStateOf(false) }
+    val members = state.membersOf(group.id).mapNotNull { id -> state.profiles.find { it.id == id } }
+        .sortedBy { state.controls.nameOf(it).lowercase() }
+    Panel {
+        SectionHeading(Icons.Default.Groups, group.name, "${members.size} ${if (members.size == 1) "persona" else "personas"} · solo tú ves este grupo")
+        if (members.isEmpty()) Text("Nadie de este grupo sigue conectado contigo.", color = TextSecondary)
+        members.forEach { person ->
+            val status = contactStatus(person.copy(displayName = state.controls.nameOf(person)), state,
+                state.othersSchedules.filter { it.userId == person.id }, state.othersStatuses.filter { it.userId == person.id })
+            val (line, color) = when (status) {
+                is UserCurrentStatus.Override -> status.customLocation to BrandSky
+                is UserCurrentStatus.InClass -> status.currentSchedule.title to ActivityCategory.fromKey(status.currentSchedule.category).accentColor
+                is UserCurrentStatus.Error -> status.message to TextMuted
+                else -> "Libre" to TextMuted
+            }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { actions.selectPerson(person) }
+                .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ProfileAvatar(state.controls.nameOf(person), Modifier.size(36.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(state.controls.nameOf(person), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(line, color = color, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { sending = true }, enabled = !state.busy && members.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Mensaje al grupo")
+            }
+            OutlinedButton(onClick = onEdit, enabled = !state.busy) { Text("Editar") }
+        }
+    }
+    if (sending) Sheet({ sending = false }, "Mensaje para «${group.name}»", "Le llegará a cada persona del grupo. Caduca después de 24 horas.") {
+        if (state.messages.isEmpty()) Text("Crea un mensaje rápido en «Mis mensajes» para enviarlo desde aquí.", color = TextSecondary)
+        state.messages.forEach { quick ->
+            OutlinedButton(onClick = { actions.sendToGroup(group.id, quick); sending = false }, enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, CardBorder)) {
+                Text(quick.label, Modifier.weight(1f), textAlign = TextAlign.Start, color = TextPrimary)
+                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupEditor(existing: PersonGroup?, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var name by rememberSaveable { mutableStateOf(existing?.name ?: "Familia") }
+    var members by remember { mutableStateOf(existing?.let { state.membersOf(it.id).toSet() } ?: emptySet()) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    val people = state.connections.mapNotNull { connection ->
+        state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
+    }.sortedBy { state.controls.nameOf(it).lowercase() }
+    val problem = when {
+        name.isBlank() || name.trim().length > 40 -> "El nombre debe tener entre 1 y 40 caracteres."
+        members.isEmpty() -> "Elige al menos una persona."
+        members.size > 20 -> "Un grupo puede tener hasta 20 personas."
+        else -> null
+    }
+    Sheet(dismiss, if (existing == null) "Nuevo grupo" else "Editar grupo", "Solo tú lo ves; las personas no reciben ningún aviso.", gesturesEnabled = false) {
+        if (existing == null) Choices(listOf("Familia", "Amigos", "Trabajo", "Universidad"), name, { name = it }) { it }
+        Field(name, { name = it.take(40) }, "Nombre del grupo")
+        people.forEach { person ->
+            val checked = person.id in members
+            Row(Modifier.fillMaxWidth().toggleable(checked, role = Role.Checkbox) { members = if (it) members + person.id else members - person.id },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Checkbox(checked, onCheckedChange = null)
+                Text(state.controls.nameOf(person), Modifier.weight(1f))
+            }
+        }
+        (problem?.takeIf { submitted } ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; if (problem == null) actions.saveGroup(draftId, existing?.id, name, members) },
+            enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Guardar grupo") }
+        if (existing != null) TextButton(onClick = { confirmDelete = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Text("Eliminar grupo", color = MaterialTheme.colorScheme.error)
+        }
+    }
+    if (confirmDelete && existing != null) Confirm("¿Eliminar «${existing.name}»?", "Las personas siguen conectadas contigo; solo desaparece el grupo.",
+        { confirmDelete = false }, { actions.deleteGroup(existing.id); confirmDelete = false; dismiss() })
 }
 
 /** Upcoming plans with connected people: answer the ones received, follow or cancel the ones sent. */

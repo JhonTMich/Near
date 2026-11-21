@@ -16,7 +16,9 @@ object AccountExport {
         people: List<AccountProfile>,
         received: List<ConnectionSignal>,
         exportedAt: String,
-        pauses: List<SchedulePause> = emptyList()
+        pauses: List<SchedulePause> = emptyList(),
+        groups: List<PersonGroup> = emptyList(),
+        groupMembers: List<PersonGroupMember> = emptyList()
     ): String {
         val names = people.associate { it.id to it.displayName }
         return json.encodeToString(JsonObject.serializer(), buildJsonObject {
@@ -52,6 +54,16 @@ object AccountExport {
             putJsonArray("connections") {
                 connections.forEach { connection ->
                     addJsonObject { put("person", names[connection.otherPerson(profile.id)] ?: "Persona sin nombre visible") }
+                }
+            }
+            putJsonArray("groups") {
+                groups.sortedBy { it.name }.forEach { group ->
+                    addJsonObject {
+                        put("name", group.name)
+                        putJsonArray("people") {
+                            groupMembers.filter { it.groupId == group.id }.forEach { add(names[it.memberId] ?: "Persona sin nombre visible") }
+                        }
+                    }
                 }
             }
             putJsonArray("received_messages") {

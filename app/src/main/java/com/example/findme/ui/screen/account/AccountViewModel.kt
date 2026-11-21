@@ -77,8 +77,15 @@ data class AccountState(
     /** Plans sent or received by this account. */
     val plans: List<PlanProposal> = emptyList(),
     /** Places saved on this phone for the automatic status; they are never sent anywhere. */
-    val autoPlaces: List<com.example.findme.places.AutoPlace> = emptyList()
+    val autoPlaces: List<com.example.findme.places.AutoPlace> = emptyList(),
+    /** Private groups of this account and who is in each. */
+    val groups: List<PersonGroup> = emptyList(),
+    val groupMembers: List<PersonGroupMember> = emptyList(),
+    /** Schedules and statuses of every connected person (not only [selectedPerson]), for the group view. */
+    val othersSchedules: List<ScheduleDto> = emptyList(),
+    val othersStatuses: List<StatusOverrideDto> = emptyList()
 ) {
+    fun membersOf(groupId: String): List<String> = groupMembers.filter { it.groupId == groupId }.map { it.memberId }
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
 }
@@ -250,6 +257,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val pausesRequest = async { readSection("schedule pauses", repository::pauses) }
             val freeAlertsRequest = async { readSection("free alerts", repository::freeAlerts) }
             val plansRequest = async { readSection("plans", repository::plans) }
+            val groupsRequest = async { readSection("groups", repository::groups) }
+            val groupMembersRequest = async { readSection("group members", repository::groupMembers) }
             val remoteProfile = profileRequest.await()
             val remoteConnections = connectionsRequest.await()
             val remoteProfiles = profilesRequest.await()
@@ -262,6 +271,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remotePauses = pausesRequest.await()
             val remoteFreeAlerts = freeAlertsRequest.await()
             val remotePlans = plansRequest.await()
+            val remoteGroups = groupsRequest.await()
+            val remoteGroupMembers = groupMembersRequest.await()
             if (repository.auth.currentUserOrNull()?.id != id) return@coroutineScope
 
             val old = _state.value
@@ -304,7 +315,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
                 preferences = preferences, pauses = pauses, selectedPerson = selected,
                 freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds },
-                plans = (remotePlans ?: previous?.plans.orEmpty()).filter { it.senderId in peopleIds || it.recipientId in peopleIds }, personSchedules = schedules.filter { it.userId == selected?.id },
+                plans = (remotePlans ?: previous?.plans.orEmpty()).filter { it.senderId in peopleIds || it.recipientId in peopleIds },
+                groups = remoteGroups ?: previous?.groups.orEmpty(),
+                groupMembers = (remoteGroupMembers ?: previous?.groupMembers.orEmpty()).filter { it.memberId in peopleIds },
+                othersSchedules = schedules.filter { it.userId != id }, othersStatuses = statuses.filter { it.userId != id }, personSchedules = schedules.filter { it.userId == selected?.id },
                 personStatuses = statuses.filter { it.userId == selected?.id }, lastSync = syncedAt, syncIssue = !complete,
                 incomingVisibility = remoteVisibility.orEmpty().filter { it.personId in peopleIds }.associateBy { it.personId },
                 peopleSchedulesFresh = remoteSchedules != null, peopleStatusesFresh = remoteStatuses != null) }
@@ -367,6 +381,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             preferences = cached.preferences, pauses = cached.pauses,
             selectedPerson = selected, personSchedules = cached.schedules.filter { row -> row.userId == selected?.id },
             personStatuses = cached.statuses.filter { row -> row.userId == selected?.id },
+            othersSchedules = cached.schedules.filter { row -> row.userId != id }, othersStatuses = cached.statuses.filter { row -> row.userId != id },
             lastSync = runCatching { Instant.parse(cached.syncedAt) }.getOrNull()) }
     }
 
@@ -635,6 +650,30 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
     }
 
+    override fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) = perform {
+        require(members.isNotEmpty()) { "Elige al menos una persona para el grupo." }
+        val owner = repository.userId()
+        val current = id?.let { _state.value.membersOf(it).toSet() }.orEmpty()
+        val group = repository.saveGroup(id, name, members, current)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        _state.update { old -> old.copy(groups = old.groups.filterNot { it.id == group.id } + group,
+            groupMembers = old.groupMembers.filterNot { it.groupId == group.id } + members.map { PersonGroupMember(group.id, it) },
+            savedScheduleDraftId = draftId, notice = "Grupo «${group.name}» guardado.") }
+    }
+    override fun deleteGroup(id: String) = perform {
+        repository.deleteGroup(id)
+        _state.update { old -> old.copy(groups = old.groups.filterNot { it.id == id },
+            groupMembers = old.groupMembers.filterNot { it.groupId == id }, notice = "Grupo eliminado.") }
+    }
+    override fun sendToGroup(groupId: String, message: QuickMessage) = perform {
+        val state = _state.value
+        val group = state.groups.find { it.id == groupId } ?: return@perform
+        val recipients = state.membersOf(groupId).filter { member -> state.connections.any { it.otherPerson(state.profile?.id.orEmpty()) == member } }
+        require(recipients.isNotEmpty()) { "Este grupo ya no tiene personas conectadas." }
+        repository.sendSignals(recipients, message.message)
+        _state.update { it.copy(notice = "Mensaje enviado a ${recipients.size} personas de «${group.name}». Se conserva durante 24 horas.") }
+    }
+
     private suspend fun loadAutoPlaces(owner: String) {
         val places = runCatching { com.example.findme.places.AutoPlaces.places(getApplication(), owner) }.getOrDefault(emptyList())
         if (repository.auth.currentUserOrNull()?.id == owner) _state.update { it.copy(autoPlaces = places) }
@@ -672,7 +711,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun replacePauses(pauses: List<SchedulePause>) {
         allSchedules = allSchedules.withPauses(pauses)
         _state.update { old -> old.copy(pauses = pauses, schedules = old.schedules.withPauses(pauses),
-            personSchedules = old.personSchedules.withPauses(pauses)) }
+            personSchedules = old.personSchedules.withPauses(pauses), othersSchedules = old.othersSchedules.withPauses(pauses)) }
         snapshotMutex.withLock { saveCurrentCache() }
         publishWidgetSnapshot()
     }
@@ -725,6 +764,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 old.copy(connections = old.connections.filterNot { it.id == id },
                     incomingVisibility = old.incomingVisibility - removed,
                     profiles = old.profiles.filterNot { it.id == removed },
+                    othersSchedules = old.othersSchedules.filterNot { it.userId == removed },
+                    othersStatuses = old.othersStatuses.filterNot { it.userId == removed },
+                    groupMembers = old.groupMembers.filterNot { it.memberId == removed },
                     preferences = old.preferences.filterNot { it.connectionId == id },
                     selectedPerson = if (wasSelected) null else old.selectedPerson,
                     personSchedules = if (wasSelected) emptyList() else old.personSchedules,
@@ -787,7 +829,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val state = _state.value
         val profile = state.profile ?: return null
         return com.example.findme.domain.model.AccountExport.build(profile, state.schedules, state.statuses, state.messages,
-            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses)
+            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses, state.groups, state.groupMembers)
     }
     override fun exportFinished(saved: Boolean) {
         _state.update { it.copy(notice = if (saved) "Copia de tus datos guardada." else null,
