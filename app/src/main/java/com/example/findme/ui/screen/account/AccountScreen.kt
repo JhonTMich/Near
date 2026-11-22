@@ -708,6 +708,17 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                         Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            schedule.sourceOwnerId?.let { sourceOwner ->
+                                val sourceName = state.profiles.firstOrNull { it.id == sourceOwner }?.displayName
+                                Text(
+                                    if (sourceName == null) "Horario sincronizado" else "Horario de $sourceName",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                                if (schedule.followedCustomized) {
+                                    Text("Con ajustes personales", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                }
+                            }
                             Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                         }
                         var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
@@ -725,7 +736,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     editing = recurring
                                     showEditor = true
                                 })
-                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Eliminar" else "Eliminar serie") },
+                                DropdownMenuItem(text = { Text(when {
+                                    recurring.sourceId != null -> "Dejar de seguir esta actividad"
+                                    recurring.isOneOff -> "Eliminar"
+                                    else -> "Eliminar serie"
+                                }) },
                                     onClick = { menuOpen = false; pendingDelete = recurring })
                             }
                         }
@@ -742,6 +757,10 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     exceptions.forEach { (schedule, exception) ->
         Panel {
             Text(schedule.title, fontWeight = FontWeight.Bold)
+            val source = state.profiles.firstOrNull { it.id == schedule.sourceOwnerId }
+            if (source != null) {
+                Text("Horario de ${source.displayName}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
             StatusPill(if (exception.cancelled) "Cancelada" else "Reprogramada",
                 if (exception.cancelled) MaterialTheme.colorScheme.error else BrandSky)
             exception.date?.takeUnless { exception.cancelled }?.let {
@@ -767,7 +786,9 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
     pendingDelete?.let { schedule ->
-        if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
+        if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+        else if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
@@ -1077,6 +1098,7 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, initialDate:
         Field(title, { title = it.take(120) }, "Título", placeholder = if (once) "Ej. Cita médica" else "Ej. Clase de inglés")
         if (editingId == null) Choices(listOf(false, true), once, { once = it }) { if (it) "Una sola fecha" else "Cada semana" }
         when {
+            once && existing?.sourceId != null -> Text(onceDate.longDate(), style = MaterialTheme.typography.bodyMedium)
             once -> SelectField("Fecha", onceDate.longDate().replaceFirstChar(Char::titlecase), onClick = { pickingDate = true },
                 expanded = pickingDate, trailing = Icons.Default.Event)
             editingId == null -> ScheduleDays(selectedDays, { selectedDays = it })
@@ -1291,6 +1313,16 @@ private fun People(state: AccountState, actions: AccountActions) {
     val people = state.connections.mapNotNull { connection ->
         state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
     }.sortedBy { controls.nameOf(it).lowercase() }
+    val pendingFollowers = state.scheduleFollowRequests.orEmpty()
+        .filter { it.leaderId == state.profile?.id && !it.approved }
+        .map { it.followerId }.toSet()
+    people.filter { it.id in pendingFollowers }.forEach { requester ->
+        OutlinedButton(
+            onClick = { selectedGroup = null; actions.selectPerson(requester) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Solicitud de horario de ${controls.nameOf(requester)}") }
+    }
     if (state.connections.isEmpty()) {
         EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
     } else {
@@ -1413,6 +1445,7 @@ private fun People(state: AccountState, actions: AccountActions) {
                 TextButton(onClick = { sendMessage = false; manageMessages = true }) { Text("Editar mensajes rápidos") }
             }
         }
+        ScheduleFollowPanel(person, state, actions, visibility?.sharesSchedule == true)
         SectionHeading(Icons.Default.CalendarMonth, "Su semana")
         when {
             visibility?.sharesSchedule == false -> Panel {
@@ -1454,6 +1487,95 @@ private fun People(state: AccountState, actions: AccountActions) {
 }
 
 /** What everyone in a group is doing now, and a message for all of them. */
+@Composable
+private fun ScheduleFollowPanel(person: AccountProfile, state: AccountState, actions: AccountActions, sharesSchedule: Boolean) {
+    val requests = state.scheduleFollowRequests ?: return
+    val owner = state.profile?.id ?: return
+    val outgoing = requests.firstOrNull { it.followerId == owner }
+    val incoming = requests.firstOrNull { it.followerId == person.id && it.leaderId == owner }
+    var showActivities by rememberSaveable(person.id) { mutableStateOf(false) }
+    var showDetach by rememberSaveable(person.id) { mutableStateOf(false) }
+
+    if (incoming != null) Panel {
+        if (incoming.approved) {
+            Text("${person.displayName} sigue tu horario")
+            TextButton(onClick = { actions.endScheduleFollow(incoming.id, null) }, enabled = !state.busy) {
+                Text("Detener sincronización")
+            }
+        } else {
+            Text("${person.displayName} quiere seguir tu horario")
+            Button(onClick = { actions.approveScheduleFollow(incoming.id) }, enabled = !state.busy) {
+                Text("Aceptar solicitud")
+            }
+            TextButton(onClick = { actions.endScheduleFollow(incoming.id, null) }, enabled = !state.busy) {
+                Text("Rechazar")
+            }
+        }
+    }
+
+    when {
+        outgoing?.leaderId == person.id && outgoing.approved -> Panel {
+            Text("Horario de ${person.displayName}")
+            Button(onClick = { showActivities = true }, enabled = !state.busy && sharesSchedule) {
+                Text("Elegir actividades")
+            }
+            TextButton(onClick = { showDetach = true }, enabled = !state.busy) {
+                Text("Desincronizar horario")
+            }
+        }
+        outgoing?.leaderId == person.id -> Panel {
+            Text("Solicitud pendiente de aceptación")
+            TextButton(onClick = { actions.endScheduleFollow(outgoing.id, null) }, enabled = !state.busy) {
+                Text("Cancelar solicitud")
+            }
+        }
+        outgoing == null && sharesSchedule -> OutlinedButton(
+            onClick = { actions.requestScheduleFollow(person.id) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Solicitar sincronización de horario") }
+    }
+
+    if (showActivities && outgoing?.approved == true && outgoing.leaderId == person.id && sharesSchedule) {
+        Sheet({ showActivities = false }, "Actividades de ${person.displayName}", "Elige cuáles quieres ver en tu horario.") {
+            val chosen = state.schedules.mapNotNull { it.sourceId }.toSet()
+            val choices = state.personSchedules.filter { it.sourceId == null }
+                .sortedWith(compareBy({ it.dayOfWeek }, { it.startTime }))
+            if (choices.isEmpty()) Text("No hay actividades para sincronizar.")
+            choices.forEach { activity ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = activity.id in chosen,
+                        onCheckedChange = { actions.selectFollowedActivity(outgoing.id, activity.id, it) },
+                        enabled = !state.busy
+                    )
+                    Column {
+                        Text(activity.title)
+                        Text(
+                            "${activity.oneOffDate ?: days[activity.dayOfWeek - 1]} · ${activity.startTime.take(5)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+
+    if (showDetach && outgoing?.approved == true && outgoing.leaderId == person.id) {
+        Sheet({ showDetach = false }, "Desincronizar horario", "Tus actividades propias y las que personalizaste se conservarán.") {
+            Button(onClick = { actions.endScheduleFollow(outgoing.id, true) }, enabled = !state.busy) {
+                Text("Conservar copia de las actividades")
+            }
+            OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, false) }, enabled = !state.busy) {
+                Text("Quitar las actividades sin editar")
+            }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
 @Composable
 private fun GroupPanel(group: PersonGroup, state: AccountState, actions: AccountActions, onEdit: () -> Unit) {
     var sending by rememberSaveable(group.id) { mutableStateOf(false) }
