@@ -5,6 +5,9 @@ import com.example.findme.data.network.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
+import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -106,9 +109,77 @@ class AccountRepository {
         }
     }
 
-    suspend fun schedules(id: String) = client.postgrest["personal_schedule"].select { filter { eq("user_id", id) } }.decodeList<ScheduleDto>()
+    suspend fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) {
+        val table = client.postgrest["followed_schedule_activities"]
+        if (selected) {
+            table.upsert(buildJsonObject {
+                put("request_id", requestId)
+                put("source_id", sourceId)
+            }) {
+                onConflict = "request_id,source_id"
+                ignoreDuplicates = true
+            }
+        } else {
+            table.delete { filter { eq("request_id", requestId); eq("source_id", sourceId) } }
+        }
+    }
+
+    suspend fun customizeFollowedActivity(activity: ScheduleDto): ScheduleDto {
+        client.postgrest["followed_schedule_activities"].update(buildJsonObject {
+            put("customization", buildJsonObject {
+                put("day_of_week", activity.dayOfWeek)
+                put("start_time", activity.startTime)
+                put("end_time", activity.endTime)
+                put("title", activity.title)
+                put("location", activity.location)
+                put("category", activity.category)
+                put("modality", activity.modality)
+                put("ends_next_day", activity.endsNextDay)
+            })
+        }) { filter { eq("id", activity.id) } }
+        return followedActivity(activity.id)
+    }
+
+    suspend fun changeFollowedOccurrence(id: String, date: String, change: ScheduleException?): ScheduleDto {
+        client.postgrest.rpc("change_followed_occurrence", buildJsonObject {
+            put("activity_id", id)
+            put("original_date", date)
+            put("change", Json.encodeToJsonElement(change))
+        })
+        return followedActivity(id)
+    }
+
+    suspend fun deleteFollowedActivity(id: String) {
+        client.postgrest["followed_schedule_activities"].delete { filter { eq("id", id) } }
+    }
+
+    suspend fun detachScheduleFollow(id: String, keepAll: Boolean) {
+        client.postgrest.rpc("end_schedule_follow", buildJsonObject {
+            put("request_id", id)
+            put("keep_all", keepAll)
+        })
+    }
+
+    private suspend fun followedActivity(id: String) =
+        client.postgrest["effective_personal_schedule"].select {
+            filter { eq("id", id); eq("user_id", userId()) }
+        }.decodeSingle<ScheduleDto>()
+
+    suspend fun schedules(id: String) = readSchedules(id)
     suspend fun overrides(id: String) = client.postgrest["personal_status"].select { filter { eq("user_id", id) } }.decodeList<StatusOverrideDto>()
-    suspend fun accessibleSchedules() = client.postgrest["personal_schedule"].select().decodeList<ScheduleDto>()
+    suspend fun accessibleSchedules() = readSchedules(null)
+
+    private suspend fun readSchedules(owner: String?): List<ScheduleDto> {
+        suspend fun read(table: String) = client.postgrest[table].select {
+            if (owner != null) filter { eq("user_id", owner) }
+        }.decodeList<ScheduleDto>()
+        return try {
+            read("effective_personal_schedule")
+        } catch (error: PostgrestRestException) {
+            if (error.code != "PGRST205" && error.code != "42P01") throw error
+            read("personal_schedule")
+        }
+    }
     suspend fun accessibleStatuses() = client.postgrest["personal_status"].select().decodeList<StatusOverrideDto>()
 
     suspend fun saveSchedules(activities: List<ScheduleDto>): List<ScheduleDto> {

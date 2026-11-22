@@ -21,7 +21,13 @@ data class ScheduleDto(
     /** "yyyy-MM-dd" for an activity that happens only on that date; null for a weekly one. Omitted when null,
      *  so weekly saves keep working on a server without the column. */
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    @SerialName("one_off_date") val oneOffDate: String? = null
+    @SerialName("one_off_date") val oneOffDate: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    @SerialName("source_id") val sourceId: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    @SerialName("source_owner_id") val sourceOwnerId: String? = null,
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    @SerialName("followed_customized") val followedCustomized: Boolean = false
 ) {
     val isOneOff: Boolean get() = oneOffDate != null
 }

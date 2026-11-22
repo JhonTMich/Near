@@ -51,6 +51,10 @@ interface AccountActions {
     fun accept(code: String) {}
     fun disconnect(id: String) {}
     suspend fun sharedSchedulesForAvailability(contactId: String): SharedSchedules? = null
+    fun requestScheduleFollow(leaderId: String) {}
+    fun approveScheduleFollow(id: String) {}
+    fun endScheduleFollow(id: String, keepAll: Boolean?) {}
+    fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) {}
     fun selectPerson(profile: AccountProfile) {}
     fun saveMessage(label: String, message: String) {}
     fun deleteMessage(id: String) {}
