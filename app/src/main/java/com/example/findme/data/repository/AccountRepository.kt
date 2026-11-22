@@ -83,6 +83,29 @@ class AccountRepository {
         client.postgrest.rpc("incoming_connection_visibility").decodeList<ConnectionVisibility>()
 
     suspend fun connections() = client.postgrest["person_connections"].select().decodeList<PersonConnection>()
+    suspend fun scheduleFollowRequests(): List<ScheduleFollowRequest> =
+        client.postgrest["schedule_follow_requests"].select().decodeList<ScheduleFollowRequest>()
+
+    suspend fun requestScheduleFollow(leaderId: String): ScheduleFollowRequest =
+        client.postgrest["schedule_follow_requests"].insert(buildJsonObject {
+            put("follower_id", userId())
+            put("leader_id", leaderId)
+        }) { select() }.decodeSingle<ScheduleFollowRequest>()
+
+    suspend fun approveScheduleFollow(requestId: String): ScheduleFollowRequest =
+        client.postgrest["schedule_follow_requests"].update(buildJsonObject {
+            put("approved", true)
+        }) {
+            filter { eq("id", requestId) }
+            select()
+        }.decodeSingle<ScheduleFollowRequest>()
+
+    suspend fun endScheduleFollow(requestId: String) {
+        client.postgrest["schedule_follow_requests"].delete {
+            filter { eq("id", requestId) }
+        }
+    }
+
     suspend fun schedules(id: String) = client.postgrest["personal_schedule"].select { filter { eq("user_id", id) } }.decodeList<ScheduleDto>()
     suspend fun overrides(id: String) = client.postgrest["personal_status"].select { filter { eq("user_id", id) } }.decodeList<StatusOverrideDto>()
     suspend fun accessibleSchedules() = client.postgrest["personal_schedule"].select().decodeList<ScheduleDto>()
