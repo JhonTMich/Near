@@ -44,6 +44,40 @@ create policy followed_activities_remove on public.followed_schedule_activities
         where r.id = request_id and r.follower_id = (select auth.uid()) and r.approved
     ));
 
+create function private.validate_followed_activity_customization()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+declare
+    source public.personal_schedule;
+    edited public.personal_schedule;
+begin
+    select * into source from public.personal_schedule s where s.id = new.source_id;
+    if not found then raise exception 'Followed activity unavailable' using errcode = 'FM004'; end if;
+    if new.customization - array[
+        'day_of_week', 'start_time', 'end_time', 'title', 'location', 'category', 'modality', 'ends_next_day'
+    ] <> '{}'::jsonb then
+        raise exception 'Unsupported customization' using errcode = 'FM004';
+    end if;
+    edited := jsonb_populate_record(source, new.customization);
+    if edited.day_of_week is null or edited.day_of_week not between 1 and 7
+        or (source.one_off_date is not null and edited.day_of_week <> source.day_of_week)
+        or edited.start_time is null or edited.end_time is null or edited.ends_next_day is null
+        or (edited.ends_next_day and edited.end_time >= edited.start_time)
+        or (not edited.ends_next_day and edited.end_time <= edited.start_time)
+        or edited.title is null or length(trim(edited.title)) not between 1 and 120
+        or edited.location is null or length(edited.location) > 160
+        or edited.category is null or edited.category not in ('university', 'work', 'free')
+        or edited.modality is null or edited.modality not in ('presencial', 'virtual') then
+        raise exception 'Invalid activity customization' using errcode = 'FM004';
+    end if;
+    return new;
+end;
+$$;
+
+revoke all on function private.validate_followed_activity_customization() from public, anon, authenticated;
+create trigger validate_followed_activity_customization
+    before update of customization on public.followed_schedule_activities
+    for each row execute function private.validate_followed_activity_customization();
+
 create view public.effective_personal_schedule with (security_invoker = true) as
 select s.id, s.user_id, s.day_of_week, s.start_time, s.end_time, s.title,
     s.location, s.category, s.modality, s.ends_next_day, s.occurrence_exceptions,

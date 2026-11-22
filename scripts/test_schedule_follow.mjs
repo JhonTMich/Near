@@ -26,6 +26,17 @@ try {
   const [chosen] = await select(id, lesson.id);
   const effective = async () => (await rows(`select * from public.effective_personal_schedule where user_id = '${a}'`));
   check((await effective()).length === 1, 'Only selected activities enter the follower schedule');
+  await t.rejects(db.exec(`update public.followed_schedule_activities
+      set customization = '{"day_of_week":0}' where id = '${chosen.id}'`),
+    'FM004', 'Invalid customization cannot corrupt the effective schedule');
+  await db.exec(`update public.followed_schedule_activities
+      set customization = '{"location":"Mi aula"}' where id = '${chosen.id}'`);
+  check((await effective())[0].location === 'Mi aula', 'The follower can personalize a selected activity');
+  await t.as(b);
+  await db.exec(`update public.personal_schedule set title = 'Clase actualizada' where id = '${lesson.id}'`);
+  await t.as(a);
+  check((await effective())[0].title === 'Clase actualizada' && (await effective())[0].location === 'Mi aula',
+    'Changes to unedited fields still propagate');
   await t.as(c);
   check((await effective()).length === 0, 'A contact of the follower cannot see the source activity');
   await t.as(b);
