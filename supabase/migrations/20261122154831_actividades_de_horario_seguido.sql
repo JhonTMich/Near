@@ -117,4 +117,48 @@ revoke all on function private.end_schedule_follow(uuid, boolean),
     public.end_schedule_follow(uuid, boolean) from public, anon, authenticated;
 grant execute on function private.end_schedule_follow(uuid, boolean),
     public.end_schedule_follow(uuid, boolean) to authenticated;
+create function public.change_followed_occurrence(activity_id uuid, original_date date, change jsonb)
+returns void language plpgsql security invoker set search_path = '' as $
+declare
+    activity record;
+    target_date date;
+    starts time;
+    ends time;
+    overnight boolean;
+    date_key text := to_char(original_date, 'YYYY-MM-DD');
+begin
+    select s.day_of_week, s.one_off_date into activity from public.effective_personal_schedule s
+    where s.id = activity_id and s.user_id = auth.uid() and s.source_id is not null;
+    if not found then raise exception 'Followed activity unavailable'; end if;
+    if activity.day_of_week <> extract(isodow from original_date)::int
+        or (activity.one_off_date is not null and activity.one_off_date <> original_date) then
+        raise exception 'Invalid occurrence date';
+    end if;
+    if change is null or change = 'null'::jsonb then
+        update public.followed_schedule_activities
+        set occurrence_changes = occurrence_changes - date_key where id = activity_id;
+        return;
+    end if;
+    if (change->>'cancelled')::boolean is true then
+        change := jsonb_build_object('cancelled', true);
+    else
+        target_date := (change->>'date')::date;
+        starts := (change->>'start_time')::time;
+        ends := (change->>'end_time')::time;
+        overnight := coalesce((change->>'ends_next_day')::boolean, false);
+        if target_date is null or starts is null or ends is null
+            or (overnight and ends >= starts) or (not overnight and ends <= starts) then
+            raise exception 'Invalid occurrence change';
+        end if;
+        change := jsonb_build_object('date', to_char(target_date, 'YYYY-MM-DD'),
+            'start_time', starts, 'end_time', ends, 'ends_next_day', overnight);
+    end if;
+    update public.followed_schedule_activities
+    set occurrence_changes = occurrence_changes || jsonb_build_object(date_key, change)
+    where id = activity_id;
+end;
+$;
+revoke all on function public.change_followed_occurrence(uuid, date, jsonb) from public, anon;
+grant execute on function public.change_followed_occurrence(uuid, date, jsonb) to authenticated;
+
 commit;
