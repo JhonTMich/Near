@@ -51,7 +51,11 @@ test('requests without a client address fall back to the per-username limit', as
     assert.deepEqual(Object.keys(JSON.parse(options.body)), ['username_hash']);
     return json(false);
   });
-  assert.equal((await handler(login())).status, 429);
+  const forwardedOnly = new Request('https://example.test', {
+    method: 'POST', body: JSON.stringify({ username: 'jhontmich', password: 'x' }),
+    headers: { 'x-forwarded-for': '198.51.100.1' },
+  });
+  assert.equal((await handler(forwardedOnly)).status, 429);
 });
 
 test('unknown user and wrong password have the same response without email disclosure', async () => {
