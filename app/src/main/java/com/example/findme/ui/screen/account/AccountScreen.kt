@@ -150,16 +150,12 @@ fun AccountContent(state: AccountState, actions: AccountActions,
     LaunchedEffect(state.scheduleRevision, state.signedIn) { if (state.scheduleRevision > 0 && state.signedIn) tab = "Horario" }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
-    // One continuous backdrop behind the top bar and the content, so no seam shows under the header.
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(AppSurface, AppBackground), endY = 1400f))) {
+    Box(Modifier.fillMaxSize().background(AppBackground)) {
     Scaffold(containerColor = Color.Transparent, contentColor = TextPrimary, snackbarHost = { NearSnackbarHost(snackbar) }, topBar = {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BrandMark(Modifier.size(46.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Near", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, letterSpacing = (-.7).sp)
-                Text(state.profile?.takeUnless { it.needsName }?.let { "Hola, ${it.displayName}" } ?: "Siempre cerca de tu gente", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
+            if (!state.signedIn) BrandMark(Modifier.size(40.dp))
+            Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
             if (state.signedIn) {
                 IconButton(onClick = actions::refresh, enabled = !state.busy) {
                     if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
@@ -169,18 +165,17 @@ fun AccountContent(state: AccountState, actions: AccountActions,
         }
     }, bottomBar = {
         if (state.signedIn && state.profile?.needsProfile == false) {
-            Surface(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(28.dp), color = AppSurface,
-                border = BorderStroke(1.dp, CardBorder)) {
+            Column(Modifier.fillMaxWidth().background(AppBackground).navigationBarsPadding()) {
+                HorizontalDivider(color = CardBorder)
                 NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp,
-                    windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.height(76.dp)) {
+                    windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.heightIn(min = 68.dp)) {
                     listOf(Triple("Mi día", "Hoy", Icons.Default.Today), Triple("Horario", "Horario", Icons.Default.CalendarMonth),
                         Triple("Personas", "Personas", Icons.Default.PeopleOutline), Triple("Cuenta", "Perfil", Icons.Default.PersonOutline)).forEach { (id, title, icon) ->
                         NavigationBarItem(selected = tab == id, onClick = { tab = id },
                             icon = { Icon(icon, null, Modifier.size(22.dp)) },
                             label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primary,
+                            colors = NavigationBarItemDefaults.colors(selectedIconColor = TextPrimary,
+                                selectedTextColor = TextPrimary, indicatorColor = AccentContainer,
                                 unselectedIconColor = TextMuted, unselectedTextColor = TextMuted))
                     }
                 }
@@ -313,8 +308,7 @@ private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
 private fun Panel(content: @Composable ColumnScope.() -> Unit) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, CardBorder),
         colors = CardDefaults.cardColors(containerColor = CardBg)) {
-        Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(CardBg, AppSurface)))
-            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
     }
 }
 
