@@ -16,7 +16,7 @@ create index followed_schedule_activities_source
 alter table public.followed_schedule_activities enable row level security;
 revoke all on public.followed_schedule_activities from public, anon, authenticated;
 grant select, delete on public.followed_schedule_activities to authenticated;
-grant insert(request_id, source_id), update(customization, occurrence_changes)
+grant insert(request_id, source_id), update(customization)
     on public.followed_schedule_activities to authenticated;
 
 create policy followed_activities_read on public.followed_schedule_activities
@@ -117,8 +117,8 @@ revoke all on function private.end_schedule_follow(uuid, boolean),
     public.end_schedule_follow(uuid, boolean) from public, anon, authenticated;
 grant execute on function private.end_schedule_follow(uuid, boolean),
     public.end_schedule_follow(uuid, boolean) to authenticated;
-create function public.change_followed_occurrence(activity_id uuid, original_date date, change jsonb)
-returns void language plpgsql security invoker set search_path = '' as $
+create function private.change_followed_occurrence(activity_id uuid, original_date date, change jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
 declare
     activity record;
     target_date date;
@@ -128,7 +128,8 @@ declare
     date_key text := to_char(original_date, 'YYYY-MM-DD');
 begin
     select s.day_of_week, s.one_off_date into activity from public.effective_personal_schedule s
-    where s.id = activity_id and s.user_id = auth.uid() and s.source_id is not null;
+    where s.id = activity_id and s.user_id = auth.uid() and s.source_id is not null
+        and private.connection_shares(s.source_owner_id, 'schedule');
     if not found then raise exception 'Followed activity unavailable'; end if;
     if activity.day_of_week <> extract(isodow from original_date)::int
         or (activity.one_off_date is not null and activity.one_off_date <> original_date) then
@@ -157,8 +158,14 @@ begin
     set occurrence_changes = occurrence_changes || jsonb_build_object(date_key, change)
     where id = activity_id;
 end;
-$;
-revoke all on function public.change_followed_occurrence(uuid, date, jsonb) from public, anon;
-grant execute on function public.change_followed_occurrence(uuid, date, jsonb) to authenticated;
+$$;
+create function public.change_followed_occurrence(activity_id uuid, original_date date, change jsonb)
+returns void language sql security invoker set search_path = '' as $$
+    select private.change_followed_occurrence(activity_id, original_date, change);
+$$;
+revoke all on function private.change_followed_occurrence(uuid, date, jsonb),
+    public.change_followed_occurrence(uuid, date, jsonb) from public, anon, authenticated;
+grant execute on function private.change_followed_occurrence(uuid, date, jsonb),
+    public.change_followed_occurrence(uuid, date, jsonb) to authenticated;
 
 commit;

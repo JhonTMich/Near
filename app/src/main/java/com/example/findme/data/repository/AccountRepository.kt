@@ -124,17 +124,26 @@ class AccountRepository {
         }
     }
 
-    suspend fun customizeFollowedActivity(activity: ScheduleDto): ScheduleDto {
+    suspend fun customizeFollowedActivity(activity: ScheduleDto, sourceId: String): ScheduleDto {
+        val source = client.postgrest["personal_schedule"].select {
+            filter { eq("id", sourceId) }
+        }.decodeSingle<ScheduleDto>()
+        val timingChanged = activity.dayOfWeek != source.dayOfWeek ||
+            java.time.LocalTime.parse(activity.startTime) != java.time.LocalTime.parse(source.startTime) ||
+            java.time.LocalTime.parse(activity.endTime) != java.time.LocalTime.parse(source.endTime) ||
+            activity.endsNextDay != source.endsNextDay
         client.postgrest["followed_schedule_activities"].update(buildJsonObject {
             put("customization", buildJsonObject {
-                put("day_of_week", activity.dayOfWeek)
-                put("start_time", activity.startTime)
-                put("end_time", activity.endTime)
-                put("title", activity.title)
-                put("location", activity.location)
-                put("category", activity.category)
-                put("modality", activity.modality)
-                put("ends_next_day", activity.endsNextDay)
+                if (timingChanged) {
+                    put("day_of_week", activity.dayOfWeek)
+                    put("start_time", activity.startTime)
+                    put("end_time", activity.endTime)
+                    put("ends_next_day", activity.endsNextDay)
+                }
+                if (activity.title != source.title) put("title", activity.title)
+                if (activity.location != source.location) put("location", activity.location)
+                if (activity.category != source.category) put("category", activity.category)
+                if (activity.modality != source.modality) put("modality", activity.modality)
             })
         }) { filter { eq("id", activity.id) } }
         return followedActivity(activity.id)

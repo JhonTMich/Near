@@ -736,7 +736,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     editing = recurring
                                     showEditor = true
                                 })
-                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Eliminar" else "Eliminar serie") },
+                                DropdownMenuItem(text = { Text(when {
+                                    recurring.sourceId != null -> "Dejar de seguir esta actividad"
+                                    recurring.isOneOff -> "Eliminar"
+                                    else -> "Eliminar serie"
+                                }) },
                                     onClick = { menuOpen = false; pendingDelete = recurring })
                             }
                         }
@@ -778,7 +782,9 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
     pendingDelete?.let { schedule ->
-        if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
+        if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+        else if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
@@ -1088,6 +1094,7 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, initialDate:
         Field(title, { title = it.take(120) }, "Título", placeholder = if (once) "Ej. Cita médica" else "Ej. Clase de inglés")
         if (editingId == null) Choices(listOf(false, true), once, { once = it }) { if (it) "Una sola fecha" else "Cada semana" }
         when {
+            once && existing?.sourceId != null -> Text(onceDate.longDate(), style = MaterialTheme.typography.bodyMedium)
             once -> SelectField("Fecha", onceDate.longDate().replaceFirstChar(Char::titlecase), onClick = { pickingDate = true },
                 expanded = pickingDate, trailing = Icons.Default.Event)
             editingId == null -> ScheduleDays(selectedDays, { selectedDays = it })

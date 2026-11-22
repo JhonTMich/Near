@@ -562,7 +562,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     require(activities.size == 1) { "Edita una sola actividad sincronizada a la vez." }
                     val activity = activities.single()
                     require(activity.oneOffDate == followed.oneOffDate) { "Usa el cambio por fecha para reprogramar esta actividad." }
-                    listOf(repository.customizeFollowedActivity(activity))
+                    listOf(repository.customizeFollowedActivity(activity, requireNotNull(followed.sourceId)))
                 }
                 val rows = saved.withPauses(_state.value.pauses)
                 if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
