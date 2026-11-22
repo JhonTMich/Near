@@ -561,12 +561,8 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
                         Text(title, style = MaterialTheme.typography.headlineLarge)
                         if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Box(Modifier.size(84.dp, 78.dp)) {
-                        Image(painterResource(R.drawable.near_mascot_head), null, Modifier.align(Alignment.TopCenter).size(78.dp, 58.dp))
-                        Surface(Modifier.align(Alignment.BottomEnd), color = AppSurface, shape = CircleShape) {
-                            Icon(Icons.Default.Schedule, null, Modifier.padding(7.dp).size(22.dp), tint = BrandAccent)
-                        }
-                    }
+                    Image(painterResource(R.drawable.near_clock_cat), contentDescription = null,
+                        modifier = Modifier.size(106.dp))
                 }
                 Button(onClick = { editStatus = true }, enabled = !state.busy) {
                     Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
