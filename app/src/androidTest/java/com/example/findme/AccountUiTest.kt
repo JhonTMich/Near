@@ -67,8 +67,8 @@ class AccountUiTest {
         compose.onNodeWithText("Horario").performClick()
         compose.onNodeWithText("Tu semana").assertIsDisplayed()
         screenshot("brand-schedule", composeOnly = true)
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Tu gente").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithText("Personas").assertIsDisplayed()
         screenshot("brand-people", composeOnly = true)
         compose.onNodeWithText("Perfil").performClick()
         screenshot("brand-profile", composeOnly = true)
@@ -86,7 +86,7 @@ class AccountUiTest {
         val snapshot = mutableStateOf(state.copy(personSchedules = emptyList(),
             incomingVisibility = mapOf(other.id to ConnectionVisibility(other.id, false, true))))
         compose.setContent { NearTheme { AccountContent(snapshot.value, object : AccountActions {}) } }
-        compose.onNodeWithText("Personas").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithText("Horario privado").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Sin actividades programadas").assertDoesNotExist()
         compose.runOnIdle {
@@ -260,8 +260,8 @@ class AccountUiTest {
     @Test fun peopleExplainsMessagesAndKeepsConfigurationOutOfMainFlow() {
         var sent = ""
         show(object : AccountActions { override fun send(message: QuickMessage) { sent = message.id } })
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Tu gente").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithText("Personas").assertIsDisplayed()
         compose.onNodeWithText("Configura un botón").assertDoesNotExist()
         screenshot("account-people")
         compose.onNodeWithText("Enviar mensaje").performScrollTo().performClick()
@@ -278,8 +278,8 @@ class AccountUiTest {
     @Test fun invitationHasShortReadableCodeAndSeparateJoinFlow() {
         var accepted = ""
         show(object : AccountActions { override fun accept(code: String) { accepted = code } })
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Conectar con alguien").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithText("Conectar con alguien").performScrollTo().performClick()
         compose.onNodeWithText("ABCD-EFGH").assertIsDisplayed()
         screenshot("account-invitation")
         compose.onNodeWithText("Tengo un código").performClick()
@@ -474,7 +474,7 @@ class AccountUiTest {
     @Test fun incomingMessageAppearsWithoutPressingRefresh() {
         val current = androidx.compose.runtime.mutableStateOf(state)
         compose.setContent { NearTheme { AccountContent(current.value, object : AccountActions {}) } }
-        compose.onNodeWithText("Personas").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithText("Te han escrito").assertDoesNotExist()
         compose.runOnIdle {
             current.value = current.value.copy(signals = listOf(ConnectionSignal(

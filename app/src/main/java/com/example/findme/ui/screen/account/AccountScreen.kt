@@ -1261,32 +1261,62 @@ private fun People(state: AccountState, actions: AccountActions) {
     var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
     if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
-    PageHeading("", "Tu gente", "")
+    PageHeading("", "Personas", "")
     state.lastSync?.let { updated ->
         Text("Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}", color = TextMuted, style = MaterialTheme.typography.labelSmall)
     }
-    FilledTonalButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)) {
-        Icon(Icons.Default.PersonAddAlt, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Conectar con alguien")
-    }
-    if (state.connections.isEmpty()) EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
-    else {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val people = state.connections.mapNotNull { connection ->
+        state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
+    }.sortedBy { controls.nameOf(it).lowercase() }
+    if (state.connections.isEmpty()) {
+        EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
+    } else {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceChip("Todos", selectedGroup == null, onClick = { selectedGroup = null }, enabled = !state.busy)
             state.groups.sortedBy { it.name.lowercase() }.forEach { group ->
-                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy,
-                    leading = { Icon(Icons.Default.Groups, null, Modifier.size(18.dp)) })
-            }
-            state.connections.forEach { connection ->
-                state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }?.let { person ->
-                    ChoiceChip(controls.nameOf(person), selectedGroup == null && state.selectedPerson?.id == person.id,
-                        onClick = { selectedGroup = null; actions.selectPerson(person) },
-                        enabled = !state.busy,
-                        leading = { Icon(if (controls.isMuted(person.id)) Icons.Default.NotificationsOff else Icons.Default.PersonOutline, null, Modifier.size(18.dp)) })
-                }
+                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy)
             }
             ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
                 leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
+        if (selectedGroup == null) Column {
+            people.forEach { person ->
+                key(person.id) {
+                    val status = contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
+                        state.othersStatuses.filter { it.userId == person.id })
+                    val (label, ink, background) = when (status) {
+                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)
+                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${status.currentSchedule.title}", BusyInk, BusySurface)
+                        is UserCurrentStatus.Override -> Triple(status.customLocation, TextPrimary, AccentContainer)
+                        is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
+                        is UserCurrentStatus.Loading -> Triple("Consultando…", TextSecondary, InnerBg)
+                    }
+                    HorizontalDivider(color = CardBorder)
+                    Row(Modifier.fillMaxWidth().selectable(selected = state.selectedPerson?.id == person.id,
+                        enabled = !state.busy, role = Role.RadioButton, onClick = { actions.selectPerson(person) })
+                        .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ProfileAvatar(controls.nameOf(person), Modifier.size(48.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(controls.nameOf(person), style = MaterialTheme.typography.titleMedium)
+                            Surface(color = background, contentColor = ink, shape = CircleShape) {
+                                Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        if (controls.isMuted(person.id)) Icon(Icons.Default.NotificationsOff, "Avisos silenciados",
+                            Modifier.size(18.dp), tint = TextMuted)
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = TextSecondary)
+                    }
+                }
+            }
+            HorizontalDivider(color = CardBorder)
+        }
+    }
+    OutlinedButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Default.PersonAddAlt, null, Modifier.size(19.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Conectar con alguien")
     }
     if (state.signals.isNotEmpty()) Panel {
         SectionHeading(Icons.Default.MarkChatUnread, "Te han escrito", "Mensajes recientes · Últimas 24 horas")
@@ -1310,16 +1340,22 @@ private fun People(state: AccountState, actions: AccountActions) {
             val busy = current is UserCurrentStatus.InClass ||
                 (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
             val watching = state.freeAlerts.any { it.targetId == person.id }
+            Surface(shape = RoundedCornerShape(18.dp), color = FreeSurface, contentColor = StatusGreenText) {
+                Row(Modifier.fillMaxWidth().clickable { showAvailability = true }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.EventAvailable, null)
+                    Column(Modifier.weight(1f)) {
+                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium)
+                        Text("Ver disponibilidad con ${person.displayName}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                }
+            }
             HeroStatusCard(current) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Enviar mensaje")
-                }
-                OutlinedButton(onClick = { showAvailability = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.EventAvailable, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Ver horas libres en común")
                 }
                 // Only useful while the person is busy; the server sends one push when that ends.
                 if (visibility?.sharesSchedule != false && watching) Row(verticalAlignment = Alignment.CenterVertically) {
