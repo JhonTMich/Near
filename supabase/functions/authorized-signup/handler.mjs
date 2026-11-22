@@ -83,7 +83,7 @@ export function createSignupHandler({ url, serviceKey, anonKey }, request = fetc
         }), signal: AbortSignal.timeout(15000),
       });
       if (result.status === 429) return reply({ message: 'Espera unos minutos antes de solicitar otro correo.' }, 429);
-      if (!result.ok) return reply({ message: 'No se pudo completar el registro o enviar la confirmación. Revisa tus datos y vuelve a intentarlo. Si persiste, contacta al responsable de FindMe.' }, 400);
+      if (!result.ok) return reply({ message: 'No se pudo completar el registro o enviar la confirmación. Revisa tus datos y vuelve a intentarlo. Si persiste, contacta al soporte de Near.' }, 400);
       return reply({ needs_confirmation: true });
     } catch {
       // Never log emails, names, passwords, tokens or upstream error details.
