@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -300,7 +301,8 @@ private fun countdown(seconds: Int) = "%d:%02d".format(Locale.ROOT, seconds / 60
 private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         if (eyebrow.isNotBlank()) Text(eyebrow.uppercase(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp)
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(title, Modifier.testTag("near-heading-$title").semantics { heading() },
+            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         if (subtitle.isNotBlank()) Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -576,6 +578,10 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     }
     Text("Mi día", style = MaterialTheme.typography.headlineSmall)
+    next?.let { upcoming ->
+        Text("Próxima en tu horario", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(upcoming.schedule.title, style = MaterialTheme.typography.titleMedium)
+    }
     val pause = state.pauses.covering(profile?.id, now.toLocalDate())
     if (today.isEmpty()) {
         Panel {
@@ -700,43 +706,39 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         val category = ActivityCategory.fromKey(schedule.category)
         val reprogrammed = recurring.occurrenceExceptions.containsKey(occurrence.originalDate.toString())
         ScheduleTimeRow(if (occurrence.window.start.isBefore(dayStart)) "Desde ayer" else start.format(hourFormat)) {
-            Panel {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentIcon(category.icon, category.accentColor)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
-                        Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        if (reprogrammed) StatusPill("Reprogramada", BrandSky)
-                        if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusPill(category.label, category.accentColor)
-                    StatusPill(schedule.modality.replaceFirstChar(Char::titlecase), TextSecondary)
-                }
-                if (schedule.location.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.LocationOn, null, Modifier.size(16.dp), tint = TextMuted)
-                    Text(schedule.location, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-                }
-                HorizontalDivider(color = CardBorder)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (recurring.isOneOff) {
-                        CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                            editing = recurring; showEditor = true
+            Surface(shape = RoundedCornerShape(14.dp), color = SlateContainer, contentColor = TextPrimary) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                         }
-                    } else {
-                        CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                            oneOff = recurring.id to occurrence.originalDate
-                        }
-                        CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                            editing = recurring; showEditor = true
+                        var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }, enabled = !state.busy) {
+                                Icon(Icons.Default.MoreVert, "Opciones de ${schedule.title}")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                if (!recurring.isOneOff) DropdownMenuItem(text = { Text("Solo esta fecha") }, onClick = {
+                                    menuOpen = false
+                                    oneOff = recurring.id to occurrence.originalDate
+                                })
+                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Editar" else "Serie semanal") }, onClick = {
+                                    menuOpen = false
+                                    editing = recurring
+                                    showEditor = true
+                                })
+                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Eliminar" else "Eliminar serie") },
+                                    onClick = { menuOpen = false; pendingDelete = recurring })
+                            }
                         }
                     }
-                    IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
-                        colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
-                        Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
-                    }
+                    val activityDetails = listOf(category.label, schedule.modality, schedule.location)
+                        .filter { it.isNotBlank() }.joinToString(" · ")
+                    Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    if (reprogrammed) StatusPill("Reprogramada", BrandSky)
+                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
                 }
             }
         }
