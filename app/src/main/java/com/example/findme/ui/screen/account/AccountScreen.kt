@@ -1564,12 +1564,20 @@ private fun ScheduleFollowPanel(person: AccountProfile, state: AccountState, act
     }
 
     if (showDetach && outgoing?.approved == true && outgoing.leaderId == person.id) {
-        Sheet({ showDetach = false }, "Desincronizar horario", "Tus actividades propias y las que personalizaste se conservarán.") {
-            Button(onClick = { actions.endScheduleFollow(outgoing.id, true) }, enabled = !state.busy) {
-                Text("Conservar copia de las actividades")
-            }
-            OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, false) }, enabled = !state.busy) {
-                Text("Quitar las actividades sin editar")
+        val description = if (sharesSchedule) "Tus actividades propias y las que personalizaste se conservarán."
+            else "El horario de origen ya no está disponible para guardar una copia. Tus actividades propias se conservarán."
+        Sheet({ showDetach = false }, "Desincronizar horario", description) {
+            if (sharesSchedule) {
+                Button(onClick = { actions.endScheduleFollow(outgoing.id, true) }, enabled = !state.busy) {
+                    Text("Conservar copia de las actividades")
+                }
+                OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, false) }, enabled = !state.busy) {
+                    Text("Quitar las actividades sin editar")
+                }
+            } else {
+                OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, null) }, enabled = !state.busy) {
+                    Text("Desincronizar sin guardar copia")
+                }
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }

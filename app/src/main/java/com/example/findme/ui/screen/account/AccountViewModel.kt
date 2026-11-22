@@ -177,6 +177,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM004" -> "La fecha o las horas de esta actividad no son válidas. Revisa la ocurrencia."
                     "FM003" -> "La zona horaria del teléfono no es válida. Revisa la configuración de fecha y hora."
                     "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
+                    "FM006" -> "El contacto dejó de compartir su horario. La sincronización sigue activa. Puedes cerrarla sin guardar una copia."
+                    "FM007" -> "La conexión terminó. Ya no se puede aceptar el plan."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
