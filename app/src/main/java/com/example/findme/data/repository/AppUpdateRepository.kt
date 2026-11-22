@@ -7,7 +7,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class ReleaseApk(val name: String, val url: String, val size: Long, val sha256: String)
-data class AppRelease(val version: String, val apk: ReleaseApk)
+/** [notes] is plain text, empty when the release does not describe its changes. */
+data class AppRelease(val version: String, val apk: ReleaseApk, val notes: String = "")
 
 object ReleaseApkPolicy {
     const val MAX_BYTES = 150L * 1024 * 1024
@@ -90,7 +91,8 @@ class AppUpdateRepository {
         check(digest.startsWith("sha256:") && sha256.matches(Regex("[0-9a-fA-F]{64}"))) {
             "No se pudo verificar la actualización."
         }
-        return AppRelease(version, ReleaseApk(asset.getValue("name").jsonPrimitive.content, url, size, sha256.lowercase()))
+        val notes = com.example.findme.domain.model.ReleaseNotes.plain(json["body"]?.jsonPrimitive?.contentOrNull)
+        return AppRelease(version, ReleaseApk(asset.getValue("name").jsonPrimitive.content, url, size, sha256.lowercase()), notes)
     }
 
 }
