@@ -62,6 +62,14 @@ try {
   await t.rejects(db.exec(`select public.end_schedule_follow('${nextRequest}', true)`), '23P01',
     'A copy with an overlap fails without discarding the request');
   await t.as(b);
+  await db.exec(`insert into public.connection_preferences(connection_id, owner_id, share_schedule)
+    values ('${ab}', '${b}', false)`);
+  await t.as(a);
+  await t.rejects(db.exec(`select public.end_schedule_follow('${nextRequest}', true)`), 'FM006',
+    'Copying fails explicitly after sharing is revoked');
+  check((await rows(`select id from public.schedule_follow_requests where id = '${nextRequest}'`)).length === 1,
+    'Failed copying leaves the follow request intact');
+  await t.as(b);
   await db.exec(`delete from public.person_connections where id = '${ab}'`);
   await t.as(a);
   check((await rows('select * from public.schedule_follow_requests')).length === 0, 'Disconnecting removes the request and selection');

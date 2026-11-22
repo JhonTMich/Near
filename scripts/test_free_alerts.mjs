@@ -53,5 +53,23 @@ try {
     insert into public.connection_preferences(connection_id, owner_id, share_schedule) values ('10000000-0000-0000-0000-000000000002', '${a}', false)`);
   await run();
   check((await rows(`select count(*)::int n from public.free_alerts`))[0].n === 0, 'Expired and unanswerable requests are removed');
+  await db.exec(`delete from public.personal_status where user_id = '${a}'`);
+  const [activity] = await rows(`insert into public.personal_schedule
+    (user_id, day_of_week, start_time, end_time, title)
+    values ('${b}', extract(isodow from now() at time zone 'UTC')::int, '00:00', '24:00', 'Actividad sincronizada')
+    returning id`);
+  await t.as(a);
+  const [follow] = await rows(`insert into public.schedule_follow_requests(follower_id, leader_id)
+    values ('${a}', '${b}') returning id`);
+  await t.as(b);
+  await db.exec(`update public.schedule_follow_requests set approved = true where id = '${follow.id}'`);
+  await t.as(a);
+  await db.exec(`insert into public.followed_schedule_activities(request_id, source_id) values ('${follow.id}', '${activity.id}')`);
+  await t.as(b);
+  await db.exec(`insert into public.free_alerts(target_id) values ('${a}')`);
+  check((await run()).length === 0, 'A followed activity postpones the free alert');
+  await db.exec(`insert into public.connection_preferences(connection_id, owner_id, share_schedule)
+    select id, '${b}', false from public.person_connections where person_a = '${a}' and person_b = '${b}'`);
+  check((await run()).length === 1, 'A hidden source schedule no longer blocks the free alert');
   console.log(`Free alerts: ${t.checks} checks passed.`);
 } finally { await db.close(); }
