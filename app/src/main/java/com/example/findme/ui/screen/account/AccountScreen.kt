@@ -1309,7 +1309,8 @@ private fun People(state: AccountState, actions: AccountActions) {
         if (selectedGroup == null) Column {
             people.forEach { person ->
                 key(person.id) {
-                    val status = contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
+                    val status = if (state.selectedPerson?.id == person.id) contactStatus(person, state)
+                    else contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
                         state.othersStatuses.filter { it.userId == person.id })
                     val (label, ink, background) = when (status) {
                         is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)

@@ -52,7 +52,9 @@ class AccountUiTest {
     }
 
     @Test fun brandScreensAcrossNavigationAndAppearance() {
-        val current = mutableStateOf(state)
+        val morning = schedule.copy(startTime = "09:00", endTime = "11:00")
+        val afternoon = schedule.copy(id = "afternoon", startTime = "14:00", endTime = "15:00", title = "Gimnasio")
+        val current = mutableStateOf(state.copy(schedules = listOf(morning, afternoon)))
         compose.setContent {
             NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
@@ -66,6 +68,7 @@ class AccountUiTest {
         screenshot("brand-my-day", composeOnly = true)
         compose.onNodeWithTag("near-tab-Horario").performClick()
         compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
+        compose.onNodeWithText("Tiempo libre · hasta las 14:00").assertExists()
         screenshot("brand-schedule", composeOnly = true)
         compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithTag("near-heading-Personas").assertIsDisplayed()
