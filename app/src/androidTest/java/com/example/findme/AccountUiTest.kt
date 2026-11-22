@@ -52,7 +52,9 @@ class AccountUiTest {
     }
 
     @Test fun brandScreensAcrossNavigationAndAppearance() {
-        val current = mutableStateOf(state)
+        val morning = schedule.copy(startTime = "09:00", endTime = "11:00")
+        val afternoon = schedule.copy(id = "afternoon", startTime = "14:00", endTime = "15:00", title = "Gimnasio")
+        val current = mutableStateOf(state.copy(schedules = listOf(morning, afternoon)))
         compose.setContent {
             NearTheme(theme = current.value.settings.theme) {
                 AccountContent(current.value, object : AccountActions {
@@ -62,13 +64,14 @@ class AccountUiTest {
                 })
             }
         }
-        compose.onNodeWithText("Mi día").assertIsDisplayed()
+        compose.onNodeWithText("Mi día").performScrollTo().assertIsDisplayed()
         screenshot("brand-my-day", composeOnly = true)
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
+        compose.onNodeWithText("Tiempo libre · hasta las 14:00").assertExists()
         screenshot("brand-schedule", composeOnly = true)
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Tu gente").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithTag("near-heading-Personas").assertIsDisplayed()
         screenshot("brand-people", composeOnly = true)
         compose.onNodeWithText("Perfil").performClick()
         screenshot("brand-profile", composeOnly = true)
@@ -77,6 +80,11 @@ class AccountUiTest {
         compose.waitForIdle()
         compose.onNodeWithText("Claro").assertIsSelected()
         screenshot("brand-appearance", composeOnly = true)
+        listOf("Hoy", "Horario", "Personas").forEach { tab ->
+            compose.onNodeWithTag("near-tab-$tab").performClick()
+            compose.onNodeWithTag("near-heading-$tab").assertIsDisplayed()
+            screenshot("brand-light-$tab", composeOnly = true)
+        }
         current.value = AccountState(initializing = false)
         compose.onNodeWithText("Qué bueno verte.").assertIsDisplayed()
         screenshot("brand-login", composeOnly = true)
@@ -86,7 +94,7 @@ class AccountUiTest {
         val snapshot = mutableStateOf(state.copy(personSchedules = emptyList(),
             incomingVisibility = mapOf(other.id to ConnectionVisibility(other.id, false, true))))
         compose.setContent { NearTheme { AccountContent(snapshot.value, object : AccountActions {}) } }
-        compose.onNodeWithText("Personas").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithText("Horario privado").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Sin actividades programadas").assertDoesNotExist()
         compose.runOnIdle {
@@ -134,10 +142,10 @@ class AccountUiTest {
                 }
             }
         }, snapshot = state.copy(schedules = listOf(schedule, work)))
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
         screenshot("account-schedule")
-        compose.onNodeWithText("Añadir").performScrollTo().performClick()
+        compose.onNodeWithText("Añadir actividad").performScrollTo().performClick()
         val heading = compose.onNodeWithText("Nueva actividad")
         repeat(3) {
             heading.performTouchInput { swipeDown(endY = bottom + 350f) }
@@ -204,8 +212,8 @@ class AccountUiTest {
             }
         }
         compose.setContent { NearTheme { AccountContent(snapshot.value, actions) } }
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Añadir").performScrollTo().performClick()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithText("Añadir actividad").performScrollTo().performClick()
         compose.onNodeWithText("Título").performTextReplacement("Clase nueva")
         val save = compose.onNodeWithText("Guardar actividad")
         save.performSemanticsAction(SemanticsActions.OnClick)
@@ -231,9 +239,10 @@ class AccountUiTest {
                 saved = activities.single()
             }
         }, snapshot = state.copy(schedules = listOf(night)))
-        compose.onNodeWithText("Horario").performClick()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
         compose.onNodeWithText("(+1 día)", substring = true).assertExists()
-        compose.onNodeWithText("Serie semanal").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Opciones de Turno nocturno").performScrollTo().performClick()
+        compose.onNodeWithText("Serie semanal").performClick()
         val overnight = compose.onNodeWithText("Termina al día siguiente")
         overnight.assertIsOn().performScrollTo().performClick()
         compose.onNodeWithText("Guardar actividad").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
@@ -260,8 +269,8 @@ class AccountUiTest {
     @Test fun peopleExplainsMessagesAndKeepsConfigurationOutOfMainFlow() {
         var sent = ""
         show(object : AccountActions { override fun send(message: QuickMessage) { sent = message.id } })
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Tu gente").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithTag("near-heading-Personas").assertIsDisplayed()
         compose.onNodeWithText("Configura un botón").assertDoesNotExist()
         screenshot("account-people")
         compose.onNodeWithText("Enviar mensaje").performScrollTo().performClick()
@@ -278,8 +287,8 @@ class AccountUiTest {
     @Test fun invitationHasShortReadableCodeAndSeparateJoinFlow() {
         var accepted = ""
         show(object : AccountActions { override fun accept(code: String) { accepted = code } })
-        compose.onNodeWithText("Personas").performClick()
-        compose.onNodeWithText("Conectar con alguien").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
+        compose.onNodeWithText("Conectar con alguien").performScrollTo().performClick()
         compose.onNodeWithText("ABCD-EFGH").assertIsDisplayed()
         screenshot("account-invitation")
         compose.onNodeWithText("Tengo un código").performClick()
@@ -421,8 +430,8 @@ class AccountUiTest {
         compose.onNodeWithText("Nada más por hoy").assertDoesNotExist()
         screenshot("blue-today-next", composeOnly = true)
         compose.onNodeWithText("Ver horario").performScrollTo().performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
-        compose.onNodeWithText("Hoy").performClick()
+        compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Hoy").performClick()
         current.value = state.copy(schedules = emptyList())
         compose.onNodeWithText("Nada más por hoy").performScrollTo().assertIsDisplayed()
         screenshot("blue-today-finished", composeOnly = true)
@@ -474,7 +483,7 @@ class AccountUiTest {
     @Test fun incomingMessageAppearsWithoutPressingRefresh() {
         val current = androidx.compose.runtime.mutableStateOf(state)
         compose.setContent { NearTheme { AccountContent(current.value, object : AccountActions {}) } }
-        compose.onNodeWithText("Personas").performClick()
+        compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithText("Te han escrito").assertDoesNotExist()
         compose.runOnIdle {
             current.value = current.value.copy(signals = listOf(ConnectionSignal(
