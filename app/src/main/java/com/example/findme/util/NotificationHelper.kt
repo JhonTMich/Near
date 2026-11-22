@@ -18,7 +18,8 @@ object NotificationHelper {
         Activities("near_activities", "Actividades de tu gente", "Cuando una persona conectada comienza una actividad."),
         Statuses("findme_status_channel", "Estados de tu gente", "Cuando tu gente comparte, cambia o quita su estado."),
         Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos que recibes."),
-        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario.")
+        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario."),
+        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a un plan que propusiste.")
     }
 
     fun createNotificationChannel(context: Context) {
@@ -39,7 +40,27 @@ object NotificationHelper {
     fun personId(personId: String) = "person:$personId".hashCode()
     fun messageId(messageId: String) = "message:$messageId".hashCode()
 
-    fun show(context: Context, channel: Channel, id: Int, title: String, text: String) {
+    /** Who can be answered from the notification: the account that received it and the sender. */
+    data class Reply(val owner: String, val recipient: String, val suggestions: List<String>)
+
+    private fun replyAction(context: Context, id: Int, reply: Reply): NotificationCompat.Action {
+        val input = androidx.core.app.RemoteInput.Builder(com.example.findme.push.MessageReplies.KEY_TEXT)
+            .setLabel("Responder").setChoices(reply.suggestions.toTypedArray()).build()
+        val intent = Intent(context, com.example.findme.push.MessageReplyReceiver::class.java)
+            .setAction(com.example.findme.push.MessageReplies.ACTION)
+            .putExtra(com.example.findme.push.MessageReplies.EXTRA_RECIPIENT, reply.recipient)
+            .putExtra(com.example.findme.push.MessageReplies.EXTRA_OWNER, reply.owner)
+            .putExtra(com.example.findme.push.MessageReplies.EXTRA_NOTIFICATION, id)
+        // Mutable so Android can add the typed text; the explicit component keeps it from going anywhere else.
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val pending = PendingIntent.getBroadcast(context, id, intent, flags)
+        return NotificationCompat.Action.Builder(R.drawable.ic_notification, "Responder", pending)
+            .addRemoteInput(input).setAllowGeneratedReplies(true)
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
+    }
+
+    fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null) {
         createNotificationChannel(context)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text)
@@ -47,13 +68,14 @@ object NotificationHelper {
             .setContentIntent(open(context, if (channel == Channel.Reminders) OPEN_SCHEDULE else OPEN_PEOPLE))
             .setOnlyAlertOnce(true).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(if (channel == Channel.Messages) NotificationCompat.CATEGORY_MESSAGE else if (channel == Channel.Reminders) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
+            .apply { reply?.let { addAction(replyAction(context, id, it)) } }
             .build()
         try { (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.notify(id, notification) }
         catch (_: SecurityException) { }
     }
 
-    fun showMessageNotification(context: Context, id: String, sender: String, message: String) =
-        show(context, Channel.Messages, messageId(id), sender, message)
+    fun showMessageNotification(context: Context, id: String, sender: String, message: String, reply: Reply? = null) =
+        show(context, Channel.Messages, messageId(id), sender, message, reply)
 
     fun showStatusNotification(context: Context, personId: String, title: String, message: String, activity: Boolean = false) =
         show(context, if (activity) Channel.Activities else Channel.Statuses, personId(personId), title, message)

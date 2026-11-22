@@ -11,6 +11,8 @@ actividades antes de que empiecen (alarmas del teléfono). El envío requiere qu
 | Cambios de estado | Alguien comparte, cambia o quita su estado, o este vence | Push (disparador y pg_cron) |
 | Mensajes recibidos | Te llega un mensaje rápido | Push (disparador) |
 | Antes de tus actividades | 10 min, 30 min o 1 h antes de cada actividad tuya | Alarma local, sin red |
+| Ya está libre | Pediste «Avísame cuando esté libre» y esa persona terminó su actividad o estado | Push (pg_cron cada minuto) |
+| Planes | Te proponen un plan, o responden al que propusiste | Push (disparador) |
 
 - Cada aviso de tu gente solo llega si esa persona comparte esa información contigo y no la silenciaste.
 - Los interruptores de Perfil → Notificaciones se aplican en el teléfono: el servidor envía avisos de

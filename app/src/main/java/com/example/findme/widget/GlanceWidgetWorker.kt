@@ -22,7 +22,7 @@ class GlanceWidgetWorker(private val context: Context, params: WorkerParameters)
     override suspend fun doWork(): Result {
         // Recalculate cached schedules even when the network is unavailable.
         context.dataStore.edit { it[longPreferencesKey("widget_clock")] = System.currentTimeMillis() }
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
         // A failed fetch only marks the widget as stale. Retrying with backoff while offline would
         // wake the device repeatedly; the periodic run tries again in 15 minutes anyway.
         try {
@@ -40,7 +40,7 @@ class GlanceWidgetWorker(private val context: Context, params: WorkerParameters)
     private suspend fun markStale() {
         context.dataStore.edit { it[WidgetStore.errorKey] = "offline" }
         context.dataStore.edit { it[longPreferencesKey("widget_clock")] = System.currentTimeMillis() }
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
     }
 
     companion object {
@@ -55,7 +55,7 @@ class GlanceWidgetWorker(private val context: Context, params: WorkerParameters)
         }
         suspend fun enqueueBoundaryUpdate(context: Context, fromBoundary: Boolean = false) {
             val work = WorkManager.getInstance(context)
-            if (androidx.glance.appwidget.GlanceAppWidgetManager(context).getGlanceIds(ConnectionWidget::class.java).isEmpty()) return
+            if (!NearWidgets.anyPlaced(context)) return
             val data = WidgetStore.data(context) ?: return
             val instant = Instant.now()
             val boundaries = data.profiles.flatMap { person ->
@@ -79,7 +79,7 @@ class GlanceWidgetWorker(private val context: Context, params: WorkerParameters)
 class WidgetBoundaryWorker(private val context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         context.dataStore.edit { it[longPreferencesKey("widget_clock")] = System.currentTimeMillis() }
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
         GlanceWidgetWorker.enqueueBoundaryUpdate(context, fromBoundary = true)
         return Result.success()
     }

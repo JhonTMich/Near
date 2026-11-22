@@ -39,7 +39,7 @@ object WidgetStore {
             it[cacheKey] = json.encodeToString(WidgetData.serializer(), WidgetData(owner, profiles, schedules, statuses))
             it.remove(errorKey)
         }
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
         GlanceWidgetWorker.enqueueBoundaryUpdate(context)
         // The reminder before your next activity follows the schedule saved here.
         com.example.findme.reminders.ActivityReminders.reschedule(context)
@@ -49,7 +49,7 @@ object WidgetStore {
         context.dataStore.edit { it.remove(cacheKey); it.remove(errorKey) }
         androidx.work.WorkManager.getInstance(context).cancelUniqueWork("WidgetStatusBoundary")
         com.example.findme.reminders.ActivityReminders.cancel(context)
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
     }
 
     suspend fun refresh(context: Context) = coroutineScope {
@@ -70,7 +70,7 @@ object WidgetStore {
 
     suspend fun select(context: Context, id: Int, owner: String, person: String) {
         context.dataStore.edit { it[selectionKey(id)] = "$owner|$person" }
-        ConnectionWidget().updateAll(context)
+        NearWidgets.updateAll(context)
     }
 
     suspend fun data(context: Context) = decode(context.dataStore.data.first()[cacheKey])

@@ -6,13 +6,14 @@ Near te ayuda a organizar tu día y estar al tanto de tu gente. Consulta qué ti
 
 ## Qué puedes hacer
 
-- **Hoy.** Mira tu actividad actual, lo que viene después y tu agenda del día. Si cambias de planes, comparte un estado como «En camino a casa» y elige cuánto dura.
-- **Horario.** Organiza tus clases, turnos y actividades personales. Puedes mover o cancelar una actividad para una sola fecha sin cambiar su horario semanal.
-- **Personas.** Conecta mediante un código, consulta los horarios y estados que te comparten, y envía mensajes rápidos como «¿Todo bien?». Cuando ambos comparten su horario, puedes ver sus horas libres en común.
-- **Perfil.** Elige qué avisos quieres recibir, activa recordatorios para tus actividades y personaliza el color de la app.
-- **Widget.** Añade **Near · Estado actual** a tu pantalla de inicio para ver tu estado o el de una persona conectada de un vistazo.
+- **Hoy.** Mira tu actividad actual, lo que viene después y tu agenda del día. Si cambias de planes, comparte un estado como «En camino a casa» y elige cuánto dura o hasta qué hora.
+- **Horario.** Organiza tus clases, turnos y actividades personales, cada semana o en una sola fecha. Mueve o cancela una actividad para un día concreto, pausa tu horario en vacaciones o feriados, e importa tus clases desde un calendario `.ics`.
+- **Personas.** Conecta mediante un código, consulta los horarios y estados que te comparten, y envía mensajes rápidos como «¿Todo bien?». Cuando ambos comparten su horario, mira sus horas libres en común y propón un plan; si lo acepta, aparece en el horario de los dos. Pide que te avisemos cuando alguien quede libre y agrupa a tu gente, por ejemplo en «Familia».
+- **Perfil.** Elige qué avisos quieres recibir, activa recordatorios para tus actividades, guarda lugares para compartir tu estado al llegar (por ejemplo «En casa») y personaliza el aspecto de la app.
+- **Avisos.** Responde a un mensaje directamente desde la notificación.
+- **Widgets.** Añade **Near · Estado actual** para ver a una persona de un vistazo, o **Near · Tu gente** para ver a todos.
 
-Tú decides con quién compartes tu horario y tu estado. También puedes silenciar avisos o gestionar cada conexión desde **Personas**.
+Tú decides con quién compartes tu horario y tu estado. También puedes silenciar avisos o gestionar cada conexión desde **Personas**. Los lugares que guardas para el estado automático se quedan en tu teléfono: solo se comparte su nombre.
 
 ## Registro con acceso limitado
 

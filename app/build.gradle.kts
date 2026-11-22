@@ -100,6 +100,8 @@ dependencies {
     // Firebase Cloud Messaging (configured from res/values/firebase.xml, no google-services plugin)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    // Geofences for the automatic status by place (the places never leave the device)
+    implementation(libs.play.services.location)
     constraints {
         // Firebase brings an older Fragment transitively; Activity Result requires 1.3 or newer.
         implementation(libs.androidx.fragment)

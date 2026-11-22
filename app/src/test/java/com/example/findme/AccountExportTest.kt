@@ -35,4 +35,21 @@ class AccountExportTest {
         assertEquals("Ana", json["received_messages"]!!.jsonArray.single().jsonObject["from"]!!.jsonPrimitive.content)
         for (internal in listOf("\"friend\"", "\"me\"", "Ajeno", "Privado")) assertFalse("Leaked $internal", text.contains(internal))
     }
+
+    @Test fun exportsPausesOneOffActivitiesAndGroupsByName() {
+        val text = AccountExport.build(me,
+            schedules = listOf(ScheduleDto("1", "me", 4, "10:00", "11:00", "Médico", "", oneOffDate = "2026-12-03")),
+            statuses = emptyList(), quickMessages = emptyList(), connections = listOf(PersonConnection("c", "friend", "me")),
+            people = listOf(me, friend), received = emptyList(), exportedAt = "2026-11-22T11:00:00Z",
+            pauses = listOf(SchedulePause("p", "me", "Vacaciones", "2026-12-20", "2027-01-04"),
+                SchedulePause("q", "friend", "Ajena", "2026-12-20", "2027-01-04")),
+            groups = listOf(PersonGroup("g", "me", "Familia")), groupMembers = listOf(PersonGroupMember("g", "friend")))
+        val json = Json.parseToJsonElement(text).jsonObject
+        assertEquals("2026-12-03", json["schedule"]!!.jsonArray.single().jsonObject["only_on"]!!.jsonPrimitive.content)
+        assertEquals("Vacaciones", json["schedule_pauses"]!!.jsonArray.single().jsonObject["title"]!!.jsonPrimitive.content)
+        val group = json["groups"]!!.jsonArray.single().jsonObject
+        assertEquals("Familia", group["name"]!!.jsonPrimitive.content)
+        assertEquals("Ana", group["people"]!!.jsonArray.single().jsonPrimitive.content)
+        assertFalse(text.contains("Ajena"))
+    }
 }

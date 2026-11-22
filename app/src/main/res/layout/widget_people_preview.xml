@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker preview and initial layout of the "Tu gente" widget, as PeopleWidget draws it. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_surface_signed_out" android:paddingHorizontal="14dp" android:paddingVertical="10dp">
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Tu gente" android:textColor="#1F2A44" android:textSize="16sp" android:textStyle="bold" android:maxLines="1" />
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/widget_card" android:paddingHorizontal="10dp" android:paddingVertical="5dp">
+<LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ana" android:textColor="#1F2A44" android:textSize="14sp" android:textStyle="bold" android:maxLines="1" />
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Clase de inglés" android:textColor="#2B3550" android:textSize="12.5sp" android:maxLines="1" />
+</LinearLayout>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/widget_chip_university" android:paddingHorizontal="8dp" android:paddingVertical="2dp" android:text="En clase" android:textColor="#FFFFFF" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" />
+</LinearLayout>
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/widget_card" android:paddingHorizontal="10dp" android:paddingVertical="5dp">
+<LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Beto" android:textColor="#1F2A44" android:textSize="14sp" android:textStyle="bold" android:maxLines="1" />
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Libre" android:textColor="#2B3550" android:textSize="12.5sp" android:maxLines="1" />
+</LinearLayout>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/widget_chip_free" android:paddingHorizontal="8dp" android:paddingVertical="2dp" android:text="Tiempo libre" android:textColor="#FFFFFF" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" />
+</LinearLayout>
+</LinearLayout>

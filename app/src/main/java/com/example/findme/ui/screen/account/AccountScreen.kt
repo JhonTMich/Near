@@ -79,6 +79,13 @@ import com.example.findme.domain.model.occurrencesOn
 import com.example.findme.data.model.ScheduleException
 import com.example.findme.data.model.SharedSchedules
 import com.example.findme.domain.model.commonFreeTime
+import com.example.findme.domain.model.FreeSlot
+import com.example.findme.domain.model.Plans
+import com.example.findme.domain.model.StatusUntil
+import com.example.findme.domain.model.covering
+import com.example.findme.domain.model.range
+import com.example.findme.domain.model.validatePause
+import com.example.findme.domain.model.validateOneOffDate
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import com.example.findme.domain.model.timeRangeLabel
@@ -499,7 +506,8 @@ private fun profileClock(zone: ZoneId): ZonedDateTime {
 }
 
 @Composable
-private fun contactStatus(person: AccountProfile, state: AccountState): UserCurrentStatus {
+private fun contactStatus(person: AccountProfile, state: AccountState,
+    schedules: List<ScheduleDto> = state.personSchedules, statuses: List<StatusOverrideDto> = state.personStatuses): UserCurrentStatus {
     val visibility = state.incomingVisibility[person.id]
         ?: return UserCurrentStatus.Error("Datos desactualizados. Actualiza para ver qué comparte.", person.displayName)
     if (!visibility.sharesSchedule && !visibility.sharesStatus) {
@@ -511,8 +519,8 @@ private fun contactStatus(person: AccountProfile, state: AccountState): UserCurr
     }
     val now = profileClock(person.zone())
     val status = StatusRepository.calculateStatus(person.displayName,
-        state.personSchedules.takeIf { visibility.sharesSchedule }.orEmpty(),
-        state.personStatuses.takeIf { visibility.sharesStatus }.orEmpty(), now.dayOfWeek.value, now)
+        schedules.takeIf { visibility.sharesSchedule }.orEmpty(),
+        statuses.takeIf { visibility.sharesStatus }.orEmpty(), now.dayOfWeek.value, now)
     return if (!visibility.sharesSchedule && status is UserCurrentStatus.FreeTime) {
         UserCurrentStatus.Error("Horario privado. No hay un estado compartido en este momento.", person.displayName)
     } else status
@@ -539,18 +547,21 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     }
     val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    val pause = state.pauses.covering(profile?.id, now.toLocalDate())
     if (today.isEmpty()) {
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Image(painterResource(R.drawable.near_mascot_head), null, modifier = Modifier.size(74.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Un día a tu ritmo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Nada más por hoy", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text(pause?.title ?: "Un día a tu ritmo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(if (pause != null) "Tu horario está en pausa hasta el ${pause.endLabel()}" else "Nada más por hoy",
+                        style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
             }
             TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
         }
     } else {
+        pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
         SectionHeading(Icons.Default.Schedule, "Después")
         NextActivityCard(next, onOpenSchedule)
         SectionHeading(Icons.Default.CalendarToday, "Agenda de hoy")
@@ -568,6 +579,10 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
 private fun StatusEditor(state: AccountState, actions: AccountActions, current: UserCurrentStatus.Override?, dismiss: () -> Unit) {
     var text by rememberSaveable { mutableStateOf(current?.customLocation.orEmpty()) }
     var minutes by rememberSaveable { mutableStateOf(60L) }
+    // -1 means "until a chosen time"; the length is computed when sharing, from the current time.
+    val zone = state.profile?.zone() ?: ZoneId.systemDefault()
+    var until by rememberSaveable { mutableStateOf(StatusUntil.suggestion(ZonedDateTime.now(zone)).format(hourFormat)) }
+    val untilMinutes = StatusRepository.parseLocalTimeOrNull(until)?.let { StatusUntil.minutes(it, ZonedDateTime.now(zone)) }
     var submitted by remember { mutableStateOf(false) }
     LaunchedEffect(state.notice, state.busy) {
         if (submitted && !state.busy && state.notice in listOf("Estado actualizado.", "Se muestra tu horario de nuevo.")) dismiss()
@@ -576,10 +591,22 @@ private fun StatusEditor(state: AccountState, actions: AccountActions, current: 
         Choices(listOf("En camino a casa", "En casa", "Ocupado", "Disponible"), text, { text = it }) { it }
         Field(text, { text = it.take(120) }, "¿Qué estás haciendo?", placeholder = "Escribe tu propio estado")
         Text("¿Durante cuánto tiempo?", style = MaterialTheme.typography.titleSmall)
-        Choices(listOf(30L, 60L, 120L, 240L), minutes, { minutes = it }) { if (it < 60) "$it min" else "${it / 60} h" }
+        Choices(listOf(30L, 60L, 120L, 240L, -1L), minutes, { minutes = it }) { when { it < 0 -> "Hasta…"; it < 60 -> "$it min"; else -> "${it / 60} h" } }
+        if (minutes < 0) {
+            TimeField(until, { until = it }, "Hasta las")
+            untilMinutes?.let {
+                Text("Durará ${StatusUntil.lengthLabel(it)}" + if (it >= 1440) ", el máximo para un estado." else ".",
+                    color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Text("Al terminar se mostrará de nuevo tu horario. Puedes cambiarlo cuando quieras.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
         if (submitted) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { submitted = true; actions.setStatus(text, minutes) }, enabled = !state.busy && text.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Compartir estado") }
+        Button(onClick = {
+            submitted = true
+            // Measured now, not when the time was picked, so it ends exactly at the chosen time.
+            val length = if (minutes < 0) StatusRepository.parseLocalTimeOrNull(until)?.let { StatusUntil.minutes(it, ZonedDateTime.now(zone)) } else minutes
+            if (length != null) actions.setStatus(text, length)
+        }, enabled = !state.busy && text.isNotBlank() && (minutes > 0 || untilMinutes != null), modifier = Modifier.fillMaxWidth()) { Text("Compartir estado") }
         if (current != null) TextButton(onClick = { submitted = true; actions.clearStatus() }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Quitar estado y volver al horario") }
     }
 }
@@ -612,8 +639,24 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     val occurrences = week[day - 1]
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
-    }.filter { (_, exception) -> exception.cancelled || exception.date != date.toString() }
-    if (occurrences.isEmpty() && exceptions.isEmpty()) {
+    }.filter { (_, exception) -> !exception.paused && (exception.cancelled || exception.date != date.toString()) }
+    val pause = state.pauses.covering(state.profile?.id, date)
+    var pausing by rememberSaveable { mutableStateOf(false) }
+    var pendingPauseDelete by remember { mutableStateOf<SchedulePause?>(null) }
+    pause?.let { paused ->
+        Panel {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AccentIcon(Icons.Default.BeachAccess, BrandSky)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(paused.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Horario en pausa · ${paused.rangeLabel()}", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text("Tus actividades semanales no aparecen estos días. Las que reprogramaste para una fecha concreta, sí.",
+                color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (occurrences.isEmpty() && exceptions.isEmpty() && pause == null) {
         EmptyPanel(Icons.Default.EventAvailable, "Espacio para tus planes", "Añade una clase, tu trabajo o una actividad personal.")
     }
     occurrences.forEach { occurrence ->
@@ -628,6 +671,7 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                     Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
                     Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     if (reprogrammed) StatusPill("Reprogramada", BrandSky)
+                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -640,15 +684,22 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             }
             HorizontalDivider(color = CardBorder)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    oneOff = recurring.id to occurrence.originalDate
-                }
-                CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    editing = recurring; showEditor = true
+                if (recurring.isOneOff) {
+                    CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        editing = recurring; showEditor = true
+                    }
+                } else {
+                    CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        oneOff = recurring.id to occurrence.originalDate
+                    }
+                    CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                        editing = recurring; showEditor = true
+                    }
                 }
                 IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
                     colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
-                    Icon(Icons.Default.DeleteOutline, "Eliminar serie de ${schedule.title}", tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
+                    Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
                 }
             }
         }
@@ -664,18 +715,210 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy) { oneOff = schedule.id to date }
         }
     }
+    SchedulePausesPanel(state, today, onAdd = { pausing = true }, onDelete = { pendingPauseDelete = it })
+    CalendarImportPanel(state, actions, zone, today)
     oneOff?.let { (id, original) ->
         state.schedules.find { it.id == id }?.let { schedule ->
             ScheduleOccurrenceEditor(schedule, original, today, state, actions) { oneOff = null }
         }
     }
-    if (showEditor) ScheduleEditor(editing, day, state, actions) { showEditor = false }
-    pendingDelete?.let { schedule -> Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
-        { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null }) }
+    if (pausing) PauseEditor(state, actions, today) { pausing = false }
+    pendingPauseDelete?.let { paused -> Confirm("¿Quitar la pausa «${paused.title}»?", "Tu horario semanal volverá a aplicarse del ${paused.rangeLabel()}.",
+        { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
+    if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
+    pendingDelete?.let { schedule ->
+        if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+        else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+    }
 }
 
 private fun LocalDate.longDate(): String =
     format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.forLanguageTag("es")))
+
+private val shortDate = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+private fun SchedulePause.endLabel(): String = range()?.second?.format(shortDate) ?: endDate
+private fun SchedulePause.rangeLabel(): String = range()?.let { (start, end) ->
+    if (start == end) start.format(shortDate) else "${start.format(shortDate)} al ${end.format(shortDate)}"
+} ?: "$startDate al $endDate"
+
+/** Opens a calendar file (.ics) and lets the person choose what to add before anything is saved. */
+@Composable
+private fun CalendarImportPanel(state: AccountState, actions: AccountActions, zone: ZoneId, today: LocalDate) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var result by remember { mutableStateOf<com.example.findme.domain.model.IcsResult?>(null) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    val open = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        // Read at most one byte past the limit, so a huge file is rejected without loading it.
+                        val limit = com.example.findme.domain.model.IcsImport.MAX_BYTES
+                        val out = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        while (out.size() <= limit) {
+                            val read = input.read(buffer, 0, minOf(buffer.size, limit + 1 - out.size()))
+                            if (read < 0) break
+                            out.write(buffer, 0, read)
+                        }
+                        if (out.size() > limit) null else out.toString(Charsets.UTF_8.name())
+                    }
+                }.getOrNull()
+            }
+            if (text == null) { failed = "No se pudo leer el archivo. Elige un calendario .ics de menos de 1 MB."; return@launch }
+            val parsed = com.example.findme.domain.model.IcsImport.parse(text, zone, today)
+            if (parsed.candidates.isEmpty()) failed = "El archivo no tiene eventos con hora que Near pueda añadir."
+            else { failed = null; result = parsed }
+        }
+    }
+    Panel {
+        SectionHeading(Icons.Default.UploadFile, "Importar un calendario",
+            "Desde un archivo .ics de Google Calendar, Outlook o el portal de tu universidad.")
+        failed?.let { FormProblem(it) }
+        OutlinedButton(onClick = { open.launch(arrayOf("text/calendar", "text/x-vcalendar", "application/octet-stream", "text/plain")) },
+            enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Elegir archivo .ics")
+        }
+    }
+    result?.let { parsed -> CalendarImportSheet(parsed, state, actions) { result = null } }
+}
+
+@Composable
+private fun CalendarImportSheet(result: com.example.findme.domain.model.IcsResult, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var chosen by remember { mutableStateOf(result.candidates.map { it.uid }.toSet()) }
+    var category by rememberSaveable { mutableStateOf(ActivityCategory.UNIVERSITY.key) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Importar ${result.candidates.size} eventos",
+        if (result.skipped > 0) "${result.skipped} eventos no se pueden importar: de todo el día, ya pasados o con otras repeticiones." else null,
+        gesturesEnabled = false) {
+        ScheduleChoice("Tipo de actividad", ActivityCategory.entries, ActivityCategory.fromKey(category), { category = it.key },
+            leading = ActivityCategory.fromKey(category).icon) { it.label }
+        result.candidates.forEach { event ->
+            val checked = event.uid in chosen
+            Row(Modifier.fillMaxWidth().toggleable(checked, role = Role.Checkbox) { chosen = if (it) chosen + event.uid else chosen - event.uid },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Checkbox(checked, onCheckedChange = null)
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val whenText = if (event.weekly) event.days.joinToString(", ") { days[it - 1].take(3) } + " · cada semana"
+                        else event.date!!.longDate()
+                    Text("$whenText · ${formatScheduleTime(event.start)}–${formatScheduleTime(event.end)}",
+                        color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Text("Las que coincidan con tu horario se omitirán. Si importas el mismo archivo otra vez, se actualizan en lugar de duplicarse.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        state.error?.takeIf { submitted }?.let { FormProblem(it) }
+        val selected = result.candidates.filter { it.uid in chosen }
+        Button(onClick = { submitted = true; actions.importSchedules(draftId, selected.flatMap { it.toSchedules(category) }) },
+            enabled = !state.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.busy) "Importando…" else "Importar ${selected.size} ${if (selected.size == 1) "evento" else "eventos"}")
+        }
+    }
+}
+
+/** Upcoming pauses, with the way to add one. Past pauses are not shown. */
+@Composable
+private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: () -> Unit, onDelete: (SchedulePause) -> Unit) {
+    val upcoming = state.pauses.filter { it.userId == state.profile?.id && it.range()?.second?.isBefore(today) == false }
+        .sortedBy { it.startDate }
+    Panel {
+        SectionHeading(Icons.Default.BeachAccess, "Pausas del horario", "Vacaciones, feriados o semanas sin clases.")
+        upcoming.forEach { pause ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(pause.title, fontWeight = FontWeight.SemiBold)
+                    Text(pause.rangeLabel(), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                IconButton(onClick = { onDelete(pause) }, enabled = !state.busy) {
+                    Icon(Icons.Default.DeleteOutline, "Quitar la pausa ${pause.title}", tint = TextMuted)
+                }
+            }
+        }
+        OutlinedButton(onClick = onAdd, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.BeachAccess, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Pausar mi horario")
+        }
+    }
+}
+
+@Composable
+private fun PauseEditor(state: AccountState, actions: AccountActions, today: LocalDate, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var title by rememberSaveable { mutableStateOf("Vacaciones") }
+    var startText by rememberSaveable { mutableStateOf<String?>(null) }
+    var endText by rememberSaveable { mutableStateOf<String?>(null) }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    val start = startText?.let(LocalDate::parse)
+    val end = endText?.let(LocalDate::parse)
+    val problem = validatePause(title, start, end, today)
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Pausar mi horario", "Tus actividades semanales no aparecerán esos días, ni para ti ni para tu gente.", gesturesEnabled = false) {
+        Choices(listOf("Vacaciones", "Feriado", "Exámenes", "Viaje"), title, { title = it }) { it }
+        Field(title, { title = it.take(60) }, "Nombre de la pausa")
+        SelectField("Fechas", if (start != null && end != null)
+            SchedulePause(title = title, startDate = start.toString(), endDate = end.toString()).rangeLabel() else "Elige el inicio y el fin",
+            onClick = { picking = true }, expanded = picking, trailing = Icons.Default.DateRange)
+        (problem?.takeIf { start != null || submitted } ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.addPause(draftId, title, startText.orEmpty(), endText.orEmpty()) },
+            enabled = !state.busy && problem == null, modifier = Modifier.fillMaxWidth()) { Text("Pausar horario") }
+    }
+    if (picking) PauseRangePicker(today, start, end, dismiss = { picking = false }) { from, to ->
+        startText = from.toString(); endText = to.toString(); picking = false
+    }
+}
+
+@Composable
+private fun SingleDatePicker(selected: LocalDate, first: LocalDate, last: LocalDate, dismiss: () -> Unit, onPicked: (LocalDate) -> Unit) {
+    fun LocalDate.millis() = atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    fun Long.date() = Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val picker = rememberDatePickerState(initialSelectedDateMillis = selected.millis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis.date().let { !it.isBefore(first) && !it.isAfter(last) }
+            override fun isSelectableYear(year: Int) = year in first.year..last.year
+        })
+    DatePickerDialog(onDismissRequest = dismiss, confirmButton = {
+        TextButton(onClick = { picker.selectedDateMillis?.date()?.let(onPicked) }, enabled = picker.selectedDateMillis != null) { Text("Listo") }
+    }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancelar") } }) {
+        DatePicker(picker, showModeToggle = false)
+    }
+}
+
+@Composable
+private fun PauseRangePicker(today: LocalDate, start: LocalDate?, end: LocalDate?, dismiss: () -> Unit,
+    onPicked: (LocalDate, LocalDate) -> Unit) {
+    fun LocalDate.millis() = atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    fun Long.date() = Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val last = today.plusDays(366)
+    val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = start?.millis(),
+        initialSelectedEndDateMillis = end?.millis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis.date().let { !it.isBefore(today) && !it.isAfter(last) }
+            override fun isSelectableYear(year: Int) = year in today.year..last.year
+        })
+    DatePickerDialog(onDismissRequest = dismiss, confirmButton = {
+        TextButton(onClick = {
+            val from = picker.selectedStartDateMillis?.date()
+            if (from != null) onPicked(from, picker.selectedEndDateMillis?.date() ?: from)
+        }, enabled = picker.selectedStartDateMillis != null) { Text("Listo") }
+    }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancelar") } }) {
+        DateRangePicker(picker, Modifier.heightIn(max = 520.dp), title = {
+            Text("Elige la primera y la última fecha", Modifier.padding(start = 24.dp, top = 16.dp))
+        }, showModeToggle = false)
+    }
+}
 
 @Composable
 private fun ScheduleOccurrenceEditor(
@@ -689,7 +932,8 @@ private fun ScheduleOccurrenceEditor(
     }
     var originalText by rememberSaveable { mutableStateOf(originals.firstOrNull { it == preferredDate }?.toString() ?: next.toString()) }
     val original = LocalDate.parse(originalText)
-    val existing = schedule.occurrenceExceptions[originalText]
+    // A date inside a pause looks cancelled on the device, but has no change of its own on the server.
+    val existing = schedule.occurrenceExceptions[originalText]?.takeUnless { it.paused }
     val draftId = rememberSaveable { UUID.randomUUID().toString() }
     var submitted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
@@ -741,9 +985,15 @@ private fun ScheduleOccurrenceEditor(
 }
 
 @Composable
-private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, initialDate: LocalDate, today: LocalDate,
+    state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
     val draftId = rememberSaveable { UUID.randomUUID().toString() }
     val editingId by rememberSaveable { mutableStateOf(existing?.id) }
+    // A weekly series and a one-off activity cannot be turned into each other; only new activities choose.
+    var once by rememberSaveable { mutableStateOf(existing?.isOneOff ?: false) }
+    var onceText by rememberSaveable { mutableStateOf(existing?.oneOffDate ?: maxOf(initialDate, today).toString()) }
+    var pickingDate by rememberSaveable { mutableStateOf(false) }
+    val onceDate = LocalDate.parse(onceText)
     var title by rememberSaveable { mutableStateOf(existing?.title.orEmpty()) }
     var location by rememberSaveable { mutableStateOf(existing?.location.orEmpty()) }
     var start by rememberSaveable { mutableStateOf(existing?.startTime ?: "09:00") }
@@ -753,27 +1003,37 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, state: Accou
     var category by rememberSaveable { mutableStateOf(existing?.category ?: "university") }
     var modality by rememberSaveable { mutableStateOf(existing?.modality ?: "presencial") }
     var submitted by rememberSaveable { mutableStateOf(false) }
-    val activities = selectedDays.map { day ->
+    val activities = if (once) listOf(ScheduleDto(
+        id = editingId ?: UUID.nameUUIDFromBytes("$draftId:once".toByteArray(Charsets.UTF_8)).toString(),
+        dayOfWeek = onceDate.dayOfWeek.value, startTime = start.trim(), endTime = end.trim(),
+        title = title.trim(), location = location.trim(), category = category, modality = modality,
+        endsNextDay = endsNextDay, oneOffDate = onceText))
+    else selectedDays.map { day ->
         val id = editingId ?: UUID.nameUUIDFromBytes("$draftId:$day".toByteArray(Charsets.UTF_8)).toString()
         ScheduleDto(id = id, dayOfWeek = day, startTime = start.trim(), endTime = end.trim(),
             title = title.trim(), location = location.trim(), category = category, modality = modality,
             endsNextDay = endsNextDay)
     }
     // Problems are only reported after a save attempt, so editing never flashes errors mid-way.
-    val problem = if (selectedDays.isEmpty()) "Elige al menos un día."
-        else validateSchedule(selectedDays.first(), start, end, title, endsNextDay)
-            ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
+    val problem = (if (once) validateOneOffDate(onceDate, today) else if (selectedDays.isEmpty()) "Elige al menos un día." else null)
+        ?: validateSchedule(activities.first().dayOfWeek, start, end, title, endsNextDay)
+        ?: activities.firstNotNullOfOrNull { findScheduleConflict(state.schedules, it) }?.conflictMessage()
     var showProblem by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality) { showProblem = false }
+    LaunchedEffect(title, start, end, endsNextDay, selectedDays, category, modality, once, onceText) { showProblem = false }
     LaunchedEffect(state.busy, state.savedScheduleDraftId) {
         if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
     }
-    Sheet(dismiss, if (editingId == null) "Nueva actividad" else "Editar serie semanal", gesturesEnabled = false) {
-        Field(title, { title = it.take(120) }, "Título", placeholder = "Ej. Clase de inglés")
-        if (editingId == null) {
-            ScheduleDays(selectedDays, { selectedDays = it })
-        } else {
-            ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
+    Sheet(dismiss, when { editingId == null -> "Nueva actividad"; once -> "Editar actividad"; else -> "Editar serie semanal" }, gesturesEnabled = false) {
+        Field(title, { title = it.take(120) }, "Título", placeholder = if (once) "Ej. Cita médica" else "Ej. Clase de inglés")
+        if (editingId == null) Choices(listOf(false, true), once, { once = it }) { if (it) "Una sola fecha" else "Cada semana" }
+        when {
+            once -> SelectField("Fecha", onceDate.longDate().replaceFirstChar(Char::titlecase), onClick = { pickingDate = true },
+                expanded = pickingDate, trailing = Icons.Default.Event)
+            editingId == null -> ScheduleDays(selectedDays, { selectedDays = it })
+            else -> ScheduleChoice("Día", (1..7).toList(), selectedDays.single(), { selectedDays = listOf(it) }) { days[it - 1] }
+        }
+        if (pickingDate) SingleDatePicker(onceDate, today, today.plusDays(366), dismiss = { pickingDate = false }) {
+            onceText = it.toString(); pickingDate = false
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ScheduleChoice("Tipo", ActivityCategory.entries, ActivityCategory.fromKey(category),
@@ -892,7 +1152,7 @@ private fun TimeField(value: String, change: (String) -> Unit, label: String) {
 }
 
 @Composable
-private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActions, dismiss: () -> Unit) {
+private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActions, onPropose: (FreeSlot) -> Unit, dismiss: () -> Unit) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var schedules by remember { mutableStateOf<SharedSchedules?>(null) }
     var error by remember { mutableStateOf(false) }
@@ -931,7 +1191,8 @@ private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActi
             }
             pair == null -> Text("Ambas personas deben compartir su horario en esta conexión.", color = TextSecondary)
             else -> {
-                Text("Próximos 7 días. Huecos de 30 minutos o más, en tu zona horaria. Se calculan a partir de sus actividades programadas.",
+                Text("Próximos 7 días. Huecos de 30 minutos o más, en tu zona horaria. Se calculan a partir de sus actividades programadas. " +
+                    "Toca un hueco para proponer un plan.",
                     color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 Choices(listOf(false, true), allHours, { allHours = it }) { if (it) "Todo el día" else "8:00–22:00" }
                 val freeDays = remember(pair, allHours, asOf) { commonFreeTime(pair, asOf, allHours) }
@@ -948,7 +1209,10 @@ private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActi
                             else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 day.slots.forEach { slot ->
                                     val end = if (slot.end.toLocalDate() > day.date) "24:00" else slot.end.format(hourFormat)
-                                    StatusPill("${slot.start.format(hourFormat)} – $end", BrandSky)
+                                    SuggestionChip(onClick = { onPropose(slot) }, label = { Text("${slot.start.format(hourFormat)} – $end") },
+                                        icon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+                                        colors = SuggestionChipDefaults.suggestionChipColors(labelColor = BrandSky, iconContentColor = BrandSky),
+                                        border = BorderStroke(1.dp, BrandSky.copy(alpha = .45f)))
                                 }
                             }
                         }
@@ -965,6 +1229,10 @@ private fun People(state: AccountState, actions: AccountActions) {
     var manageMessages by rememberSaveable { mutableStateOf(false) }
     var disconnect by remember { mutableStateOf<PersonConnection?>(null) }
     var manageConnection by remember { mutableStateOf<PersonConnection?>(null) }
+    var selectedGroup by rememberSaveable { mutableStateOf<String?>(null) }
+    var groupEditor by rememberSaveable { mutableStateOf(false) }
+    var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
+    if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
     PageHeading("", "Tu gente", "")
     state.lastSync?.let { updated ->
@@ -977,13 +1245,20 @@ private fun People(state: AccountState, actions: AccountActions) {
     if (state.connections.isEmpty()) EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
     else {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            state.groups.sortedBy { it.name.lowercase() }.forEach { group ->
+                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy,
+                    leading = { Icon(Icons.Default.Groups, null, Modifier.size(18.dp)) })
+            }
             state.connections.forEach { connection ->
                 state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }?.let { person ->
-                    ChoiceChip(controls.nameOf(person), state.selectedPerson?.id == person.id, onClick = { actions.selectPerson(person) },
+                    ChoiceChip(controls.nameOf(person), selectedGroup == null && state.selectedPerson?.id == person.id,
+                        onClick = { selectedGroup = null; actions.selectPerson(person) },
                         enabled = !state.busy,
                         leading = { Icon(if (controls.isMuted(person.id)) Icons.Default.NotificationsOff else Icons.Default.PersonOutline, null, Modifier.size(18.dp)) })
                 }
             }
+            ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
+                leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
     }
     if (state.signals.isNotEmpty()) Panel {
@@ -993,13 +1268,22 @@ private fun People(state: AccountState, actions: AccountActions) {
                 state.busy, actions)
         }
     }
-    state.selectedPerson?.let { selected ->
+    PlansPanel(state, actions)
+    state.groups.find { it.id == selectedGroup }?.let { group ->
+        GroupPanel(group, state, actions, onEdit = { editingGroup = group; groupEditor = true })
+    }
+    if (groupEditor) GroupEditor(editingGroup, state, actions) { groupEditor = false }
+    if (selectedGroup == null) state.selectedPerson?.let { selected ->
         val person = selected.copy(displayName = controls.nameOf(selected))
         val visibility = state.incomingVisibility[person.id]
         key(person.id) {
             var showAvailability by rememberSaveable { mutableStateOf(false) }
             var sendMessage by rememberSaveable { mutableStateOf(false) }
-            HeroStatusCard(contactStatus(person, state)) {
+            val current = contactStatus(person, state)
+            val busy = current is UserCurrentStatus.InClass ||
+                (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
+            val watching = state.freeAlerts.any { it.targetId == person.id }
+            HeroStatusCard(current) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -1010,9 +1294,24 @@ private fun People(state: AccountState, actions: AccountActions) {
                     Spacer(Modifier.width(8.dp))
                     Text("Ver horas libres en común")
                 }
+                // Only useful while the person is busy; the server sends one push when that ends.
+                if (visibility?.sharesSchedule != false && watching) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.NotificationsActive, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Te avisaremos cuando quede libre", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { actions.cancelFreeAlert(person.id) }, enabled = !state.busy) { Text("Cancelar") }
+                } else if (visibility?.sharesSchedule != false && busy) OutlinedButton(onClick = { actions.notifyWhenFree(person.id) },
+                    enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.NotificationsActive, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Avísame cuando esté libre")
+                }
                 TextButton(onClick = { manageMessages = true }) { Text("Mis mensajes") }
             }
-            if (showAvailability) CommonAvailabilitySheet(person, actions) { showAvailability = false }
+            var proposing by remember { mutableStateOf<FreeSlot?>(null) }
+            if (showAvailability) CommonAvailabilitySheet(person, actions,
+                onPropose = { proposing = it; showAvailability = false }) { showAvailability = false }
+            proposing?.let { slot -> PlanSheet(person, slot, state, actions) { proposing = null } }
             if (sendMessage) Sheet({ sendMessage = false }, "Mensaje para ${person.displayName}", "Los mensajes caducan después de 24 horas.") {
                 if (state.messages.isEmpty()) Text("Crea un mensaje rápido para enviarlo desde aquí.", color = TextSecondary)
                 state.messages.forEach { quick ->
@@ -1043,6 +1342,9 @@ private fun People(state: AccountState, actions: AccountActions) {
                 val personDate = LocalDate.now(person.zone()).with(TemporalAdjusters.nextOrSame(DayOfWeek.of(personDay)))
                 Text(personDate.longDate(), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 val schedules = state.personSchedules.occurrencesOn(personDate, person.zone()).map { it.schedule }
+                state.pauses.covering(person.id, personDate)?.let { pause ->
+                    StatusPill("${pause.title} · horario en pausa hasta el ${pause.endLabel()}", BrandSky)
+                }
                 if (schedules.isEmpty()) Text("Sin actividades programadas", color = TextSecondary)
                 schedules.forEachIndexed { index, schedule -> ActivityTimelineCard(schedule, false,
                     last = index == schedules.lastIndex, displayDay = personDay) }
@@ -1062,6 +1364,178 @@ private fun People(state: AccountState, actions: AccountActions) {
     }
     disconnect?.let { connection -> Confirm("¿Desvincular persona?", "Ambos dejarán de ver el horario y estado del otro.",
         { disconnect = null }, { actions.disconnect(connection.id); disconnect = null }) }
+}
+
+/** What everyone in a group is doing now, and a message for all of them. */
+@Composable
+private fun GroupPanel(group: PersonGroup, state: AccountState, actions: AccountActions, onEdit: () -> Unit) {
+    var sending by rememberSaveable(group.id) { mutableStateOf(false) }
+    val members = state.membersOf(group.id).mapNotNull { id -> state.profiles.find { it.id == id } }
+        .sortedBy { state.controls.nameOf(it).lowercase() }
+    Panel {
+        SectionHeading(Icons.Default.Groups, group.name, "${members.size} ${if (members.size == 1) "persona" else "personas"} · solo tú ves este grupo")
+        if (members.isEmpty()) Text("Nadie de este grupo sigue conectado contigo.", color = TextSecondary)
+        members.forEach { person ->
+            val status = contactStatus(person.copy(displayName = state.controls.nameOf(person)), state,
+                state.othersSchedules.filter { it.userId == person.id }, state.othersStatuses.filter { it.userId == person.id })
+            val (line, color) = when (status) {
+                is UserCurrentStatus.Override -> status.customLocation to BrandSky
+                is UserCurrentStatus.InClass -> status.currentSchedule.title to ActivityCategory.fromKey(status.currentSchedule.category).accentColor
+                is UserCurrentStatus.Error -> status.message to TextMuted
+                else -> "Libre" to TextMuted
+            }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { actions.selectPerson(person) }
+                .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ProfileAvatar(state.controls.nameOf(person), Modifier.size(36.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(state.controls.nameOf(person), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(line, color = color, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { sending = true }, enabled = !state.busy && members.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Mensaje al grupo")
+            }
+            OutlinedButton(onClick = onEdit, enabled = !state.busy) { Text("Editar") }
+        }
+    }
+    if (sending) Sheet({ sending = false }, "Mensaje para «${group.name}»", "Le llegará a cada persona del grupo. Caduca después de 24 horas.") {
+        if (state.messages.isEmpty()) Text("Crea un mensaje rápido en «Mis mensajes» para enviarlo desde aquí.", color = TextSecondary)
+        state.messages.forEach { quick ->
+            OutlinedButton(onClick = { actions.sendToGroup(group.id, quick); sending = false }, enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, CardBorder)) {
+                Text(quick.label, Modifier.weight(1f), textAlign = TextAlign.Start, color = TextPrimary)
+                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupEditor(existing: PersonGroup?, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var name by rememberSaveable { mutableStateOf(existing?.name ?: "Familia") }
+    var members by remember { mutableStateOf(existing?.let { state.membersOf(it.id).toSet() } ?: emptySet()) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    val people = state.connections.mapNotNull { connection ->
+        state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
+    }.sortedBy { state.controls.nameOf(it).lowercase() }
+    val problem = when {
+        name.isBlank() || name.trim().length > 40 -> "El nombre debe tener entre 1 y 40 caracteres."
+        members.isEmpty() -> "Elige al menos una persona."
+        members.size > 20 -> "Un grupo puede tener hasta 20 personas."
+        else -> null
+    }
+    Sheet(dismiss, if (existing == null) "Nuevo grupo" else "Editar grupo", "Solo tú lo ves; las personas no reciben ningún aviso.", gesturesEnabled = false) {
+        if (existing == null) Choices(listOf("Familia", "Amigos", "Trabajo", "Universidad"), name, { name = it }) { it }
+        Field(name, { name = it.take(40) }, "Nombre del grupo")
+        people.forEach { person ->
+            val checked = person.id in members
+            Row(Modifier.fillMaxWidth().toggleable(checked, role = Role.Checkbox) { members = if (it) members + person.id else members - person.id },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Checkbox(checked, onCheckedChange = null)
+                Text(state.controls.nameOf(person), Modifier.weight(1f))
+            }
+        }
+        (problem?.takeIf { submitted } ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; if (problem == null) actions.saveGroup(draftId, existing?.id, name, members) },
+            enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Guardar grupo") }
+        if (existing != null) TextButton(onClick = { confirmDelete = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Text("Eliminar grupo", color = MaterialTheme.colorScheme.error)
+        }
+    }
+    if (confirmDelete && existing != null) Confirm("¿Eliminar «${existing.name}»?", "Las personas siguen conectadas contigo; solo desaparece el grupo.",
+        { confirmDelete = false }, { actions.deleteGroup(existing.id); confirmDelete = false; dismiss() })
+}
+
+/** Upcoming plans with connected people: answer the ones received, follow or cancel the ones sent. */
+@Composable
+private fun PlansPanel(state: AccountState, actions: AccountActions) {
+    val own = state.profile?.id ?: return
+    val now = Instant.now()
+    val plans = Plans.upcoming(state.plans, now).filter { it.status != "cancelled" }
+    if (plans.isEmpty()) return
+    val zone = ZoneId.systemDefault()
+    fun name(id: String) = state.profiles.find { it.id == id }?.let(state.controls::nameOf) ?: "Tu gente"
+    Panel {
+        SectionHeading(Icons.Default.Event, "Planes", "Propuestas desde las horas libres en común")
+        plans.forEach { plan ->
+            val received = plan.recipientId == own
+            val other = name(if (received) plan.senderId else plan.recipientId)
+            Surface(shape = RoundedCornerShape(16.dp), color = CardBg, border = BorderStroke(1.dp, CardBorder)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(plan.title, fontWeight = FontWeight.Bold)
+                    Text(Plans.whenText(plan.startsAt, plan.endsAt, zone).replaceFirstChar(Char::titlecase),
+                        color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    if (plan.location.isNotBlank()) Text(plan.location, color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    when {
+                        plan.status == "pending" && received -> {
+                            Text("$other te lo propone", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { actions.answerPlan(plan.id, true) }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Aceptar") }
+                                OutlinedButton(onClick = { actions.answerPlan(plan.id, false) }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("No puedo") }
+                            }
+                        }
+                        plan.status == "pending" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Esperando respuesta de $other", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { actions.cancelPlan(plan.id) }, enabled = !state.busy) { Text("Cancelar") }
+                        }
+                        plan.status == "accepted" -> StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                        else -> StatusPill(if (received) "Lo rechazaste" else "$other no puede", TextMuted)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanSheet(person: AccountProfile, slot: FreeSlot, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    val draftId = rememberSaveable { UUID.randomUUID().toString() }
+    var title by rememberSaveable { mutableStateOf(Plans.TITLES.first()) }
+    var location by rememberSaveable { mutableStateOf("") }
+    // Starts every 30 minutes inside the free slot, leaving at least 30 minutes before it ends.
+    val firstStart = slot.start.truncatedTo(java.time.temporal.ChronoUnit.MINUTES).let { start ->
+        val extra = (30 - start.minute % 30) % 30
+        start.plusMinutes(extra.toLong()).takeIf { !it.plusMinutes(30).isAfter(slot.end) } ?: start
+    }
+    val starts = generateSequence(firstStart) { it.plusMinutes(30) }.takeWhile { !it.plusMinutes(30).isAfter(slot.end) }.take(48).toList()
+        .ifEmpty { listOf(slot.start) }
+    var startIndex by rememberSaveable { mutableIntStateOf(0) }
+    val start = starts[startIndex.coerceIn(starts.indices)]
+    val durations = Plans.DURATIONS.filter { !start.plusMinutes(it).isAfter(slot.end) }.ifEmpty { listOf(30L) }
+    var minutes by rememberSaveable { mutableLongStateOf(60L) }
+    val duration = if (minutes in durations) minutes else durations.last()
+    val end = start.plusMinutes(duration)
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    val problem = Plans.validate(title, start.toInstant(), end.toInstant(), Instant.now())
+    LaunchedEffect(state.busy, state.savedScheduleDraftId) {
+        if (submitted && !state.busy && state.savedScheduleDraftId == draftId) dismiss()
+    }
+    Sheet(dismiss, "Proponer un plan a ${person.displayName}", "Si acepta, se añadirá al horario de ambos.") {
+        Choices(Plans.TITLES, title, { title = it }) { it }
+        Field(title, { title = it.take(120) }, "¿Qué quieres proponer?")
+        Text(start.toLocalDate().longDate().replaceFirstChar(Char::titlecase), style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScheduleChoice("Empieza", starts.indices.toList(), startIndex.coerceIn(starts.indices), { startIndex = it },
+                Modifier.weight(1f), leading = Icons.Default.Schedule) { starts[it].format(hourFormat) }
+            ScheduleChoice("Dura", durations, duration, { minutes = it }, Modifier.weight(1f)) {
+                if (it < 60) "$it min" else if (it % 60 == 0L) "${it / 60} h" else "${it / 60} h ${it % 60} min"
+            }
+        }
+        Field(location, { location = it.take(160) }, "Lugar (opcional)")
+        (problem ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.proposePlan(draftId, person.id, title, location, start.toInstant(), end.toInstant()) },
+            enabled = !state.busy && problem == null, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Enviar propuesta")
+        }
+    }
 }
 
 @Composable
@@ -1198,6 +1672,7 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
             }
         }
     }
+    AutoPlacesPanel(state, actions)
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1262,6 +1737,84 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
 }
 
 private enum class AccountSheet { Profile, Password, Delete }
+
+/**
+ * Automatic status by place. The places are saved only on this phone; the only thing shared is the label,
+ * as a normal status. Location permission is asked for when the first place is saved, not before.
+ */
+@Composable
+private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
+    val context = LocalContext.current
+    var location by remember { mutableStateOf(com.example.findme.places.AutoPlaces.hasLocation(context)) }
+    var background by remember { mutableStateOf(com.example.findme.places.AutoPlaces.hasBackground(context)) }
+    var adding by rememberSaveable { mutableStateOf(false) }
+    androidx.lifecycle.compose.LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val nowLocation = com.example.findme.places.AutoPlaces.hasLocation(context)
+        val nowBackground = com.example.findme.places.AutoPlaces.hasBackground(context)
+        if (nowLocation != location || nowBackground != background) actions.refreshAutoPlaces()
+        location = nowLocation; background = nowBackground
+    }
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        location = granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (location) adding = true
+    }
+    val askBackground = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {
+        background = com.example.findme.places.AutoPlaces.hasBackground(context)
+        actions.refreshAutoPlaces()
+    }
+    Panel {
+        SectionHeading(Icons.Default.Place, "Estado automático por lugar",
+            "Al llegar a un lugar guardado compartimos su nombre, por ejemplo «En casa», y lo quitamos al salir. " +
+                "Tu ubicación nunca sale del teléfono.")
+        state.autoPlaces.forEach { place ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(place.label, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = { actions.removeAutoPlace(place.id) }, enabled = !state.busy) {
+                    Icon(Icons.Default.DeleteOutline, "Quitar ${place.label}", tint = TextMuted)
+                }
+            }
+        }
+        if (state.autoPlaces.isNotEmpty() && location && !background) {
+            Text("Para que funcione con Near cerrado, permite la ubicación «Todo el tiempo».",
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            SettingsRow(Icons.Default.LocationOn, "Permitir ubicación todo el tiempo") {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+                    askBackground.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        }
+        if (state.autoPlaces.isNotEmpty() && !location) Text("Near ya no tiene permiso de ubicación; los lugares están en pausa.",
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        Text("Un estado que compartas a mano no se reemplaza ni se quita al llegar o salir.", color = TextMuted,
+            style = MaterialTheme.typography.bodySmall)
+        if (state.autoPlaces.size < com.example.findme.places.AutoPlaces.MAX) OutlinedButton(onClick = {
+            if (location) adding = true
+            else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+        }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.AddLocationAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Guardar dónde estoy ahora")
+        }
+    }
+    if (adding) AutoPlaceSheet(state, actions) { adding = false }
+}
+
+@Composable
+private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+    var label by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.LABELS.first()) }
+    var submitted by remember { mutableStateOf(false) }
+    val count = state.autoPlaces.size
+    LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
+    Sheet(dismiss, "Guardar este lugar", "Usaremos tu ubicación actual, con un radio de unos 150 metros.") {
+        Choices(com.example.findme.places.AutoPlaces.LABELS, label, { label = it }) { it }
+        Field(label, { label = it.take(60) }, "Estado al llegar")
+        (com.example.findme.places.AutoPlaces.validateLabel(label) ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
+        Button(onClick = { submitted = true; actions.addAutoPlace(label) },
+            enabled = !state.busy && com.example.findme.places.AutoPlaces.validateLabel(label) == null, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.busy) "Buscando tu ubicación…" else "Guardar lugar")
+        }
+    }
+}
 
 /** Avatar, name and handle at the top of the profile, with a single entry point to edit them. */
 @Composable
