@@ -240,6 +240,29 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         null
     }
 
+    /** Zone the server last refused, so an unknown device zone is not sent again on every refresh. */
+    private var refusedTimezone: String? = null
+
+    /**
+     * The profile's zone was fixed when the account was created, so a wrong phone setting or a trip
+     * left schedules, reminders and pushes shifted. Keep it equal to the phone's zone.
+     */
+    private suspend fun followPhoneTimezone(profile: AccountProfile): AccountProfile {
+        val zone = ZoneId.systemDefault().id
+        if (profile.timezone == zone || zone == refusedTimezone) return profile
+        return try { repository.updateTimezone(zone) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
+            // The server rejects zones it does not know (FM003); a network failure is retried next refresh.
+            android.util.Log.w("AccountViewModel", "Time zone not accepted (code ${error.code})")
+            refusedTimezone = zone
+            profile
+        } catch (error: Exception) {
+            android.util.Log.w("AccountViewModel", "Unable to synchronize time zone (${error.javaClass.simpleName})")
+            profile
+        }
+    }
+
     private suspend fun load() = snapshotMutex.withLock {
         coroutineScope {
             val id = repository.userId()
@@ -277,10 +300,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
 
             val old = _state.value
             val previous = if (old.profile?.id == id) old else null
-            val profile = remoteProfile ?: previous?.profile ?: run {
+            val loadedProfile = remoteProfile ?: previous?.profile ?: run {
                 _state.update { it.copy(syncIssue = true) }
                 return@coroutineScope
             }
+            val profile = if (remoteProfile != null) followPhoneTimezone(remoteProfile) else loadedProfile
             val connections = remoteConnections ?: previous?.connections.orEmpty()
             val peopleIds = connections.map { it.otherPerson(id) }.toSet()
             val profiles = (remoteProfiles ?: previous?.profiles.orEmpty()).filter { it.id in peopleIds } + profile

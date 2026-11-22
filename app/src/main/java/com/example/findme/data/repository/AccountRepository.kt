@@ -72,6 +72,13 @@ class AccountRepository {
             select()
         }.decodeSingle<AccountProfile>()
     }
+    /** Schedules, reminders and the server's activity pushes all read the profile's zone; it follows the phone's. */
+    suspend fun updateTimezone(zone: String): AccountProfile =
+        client.postgrest["account_profiles"].update(buildJsonObject { put("timezone", zone) }) {
+            filter { eq("id", userId()) }
+            select()
+        }.decodeSingle<AccountProfile>()
+
     suspend fun incomingConnectionVisibility() =
         client.postgrest.rpc("incoming_connection_visibility").decodeList<ConnectionVisibility>()
 
