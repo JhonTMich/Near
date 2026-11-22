@@ -62,7 +62,7 @@ class AccountUiTest {
                 })
             }
         }
-        compose.onNodeWithText("Mi día").assertIsDisplayed()
+        compose.onNodeWithText("Mi día").performScrollTo().assertIsDisplayed()
         screenshot("brand-my-day", composeOnly = true)
         compose.onNodeWithText("Horario").performClick()
         compose.onNodeWithText("Tu semana").assertIsDisplayed()
@@ -422,7 +422,7 @@ class AccountUiTest {
         screenshot("blue-today-next", composeOnly = true)
         compose.onNodeWithText("Ver horario").performScrollTo().performClick()
         compose.onNodeWithText("Tu semana").assertIsDisplayed()
-        compose.onNodeWithText("Hoy").performClick()
+        compose.onNodeWithTag("near-tab-Hoy").performClick()
         current.value = state.copy(schedules = emptyList())
         compose.onNodeWithText("Nada más por hoy").performScrollTo().assertIsDisplayed()
         screenshot("blue-today-finished", composeOnly = true)

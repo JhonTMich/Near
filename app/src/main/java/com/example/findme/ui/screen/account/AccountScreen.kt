@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -89,7 +90,6 @@ import com.example.findme.domain.model.validateOneOffDate
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import com.example.findme.domain.model.timeRangeLabel
-import com.example.findme.domain.model.nextActivityToday
 import com.example.findme.ui.components.*
 import com.example.findme.ui.theme.*
 import java.time.DayOfWeek
@@ -172,6 +172,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
                     listOf(Triple("Mi día", "Hoy", Icons.Default.Today), Triple("Horario", "Horario", Icons.Default.CalendarMonth),
                         Triple("Personas", "Personas", Icons.Default.PeopleOutline), Triple("Cuenta", "Perfil", Icons.Default.PersonOutline)).forEach { (id, title, icon) ->
                         NavigationBarItem(selected = tab == id, onClick = { tab = id },
+                            modifier = Modifier.testTag("near-tab-$title"),
                             icon = { Icon(icon, null, Modifier.size(22.dp)) },
                             label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
                             colors = NavigationBarItemDefaults.colors(selectedIconColor = TextPrimary,
@@ -526,21 +527,55 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
     val profile = state.profile
     val now = profileClock(profile?.zone() ?: ZoneId.systemDefault())
     val status = profile?.let { StatusRepository.calculateStatus(it.displayName, state.schedules, state.statuses, now.dayOfWeek.value, now) }
-    val next = nextActivityToday(state.schedules, now)
-    PageHeading("", "Mi día", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es"))))
+    val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    val next = today.firstOrNull { it.window.start.isAfter(now) }
+    PageHeading("", "Hoy", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es")))
+        .replaceFirstChar { it.titlecase() })
     status?.let { current ->
-        HeroStatusCard(current, heading = "Ahora") {
-            Button(onClick = { editStatus = true }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) {
-                Icon(Icons.Default.Edit, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
-            }
-            if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
-                Text("Volver al horario")
+        val title = when (current) {
+            is UserCurrentStatus.FreeTime -> "Estoy libre"
+            is UserCurrentStatus.InClass -> current.currentSchedule.title
+            is UserCurrentStatus.Override -> current.customLocation
+            is UserCurrentStatus.Error -> "Estado no disponible"
+            is UserCurrentStatus.Loading -> "Consultando actividad…"
+        }
+        val detail = when (current) {
+            is UserCurrentStatus.FreeTime -> next?.let { "Hasta las ${it.window.start.format(hourFormat)}" }
+                ?: "Sin más actividades hoy"
+            is UserCurrentStatus.InClass -> listOf(current.currentSchedule.location,
+                "Termina en ${formatDurationMinutes(current.remainingMinutes)}").filter { it.isNotBlank() }.joinToString(" · ")
+            is UserCurrentStatus.Override -> listOfNotNull(
+                current.customMessage?.takeIf { it.isNotBlank() },
+                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" }
+            ).joinToString(" · ")
+            is UserCurrentStatus.Error -> current.message
+            is UserCurrentStatus.Loading -> ""
+        }
+        Surface(shape = RoundedCornerShape(22.dp), color = AccentContainer, contentColor = TextPrimary) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(title, style = MaterialTheme.typography.headlineLarge)
+                        if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Box(Modifier.size(84.dp, 78.dp)) {
+                        Image(painterResource(R.drawable.near_mascot_head), null, Modifier.align(Alignment.TopCenter).size(78.dp, 58.dp))
+                        Surface(Modifier.align(Alignment.BottomEnd), color = AppSurface, shape = CircleShape) {
+                            Icon(Icons.Default.Schedule, null, Modifier.padding(7.dp).size(22.dp), tint = BrandAccent)
+                        }
+                    }
+                }
+                Button(onClick = { editStatus = true }, enabled = !state.busy) {
+                    Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
+                }
+                if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
+                    Text("Volver al horario")
+                }
             }
         }
     }
-    val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    Text("Mi día", style = MaterialTheme.typography.headlineSmall)
     val pause = state.pauses.covering(profile?.id, now.toLocalDate())
     if (today.isEmpty()) {
         Panel {
@@ -556,15 +591,13 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     } else {
         pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
-        SectionHeading(Icons.Default.Schedule, "Después")
-        NextActivityCard(next, onOpenSchedule)
-        SectionHeading(Icons.Default.CalendarToday, "Agenda de hoy")
         today.forEachIndexed { index, occurrence ->
             ActivityTimelineCard(occurrence.schedule,
                 active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
                     now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
                 last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
         }
+        TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
     }
     if (editStatus) StatusEditor(state, actions, status as? UserCurrentStatus.Override) { editStatus = false }
 }
