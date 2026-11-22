@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -63,7 +62,7 @@ fun ActivityTimelineCard(schedule: ScheduleDto, active: Boolean, last: Boolean =
         Card(Modifier.weight(1f).padding(bottom = 4.dp).animateContentSize(), shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = Color.Transparent),
             border = BorderStroke(1.dp, if (active) accent.copy(alpha = .6f) else CardBorder)) {
-            Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(accent.copy(alpha = if (active) .18f else .08f), CardBg)))
+            Column(Modifier.fillMaxWidth().background(if (compact) SlateContainer else CardBg)
                 .padding(if (compact) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(category.icon, null, tint = accent, modifier = Modifier.size(16.dp))

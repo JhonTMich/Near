@@ -43,10 +43,11 @@ class MonitorUiTest {
         var selected = 1
         compose.setContent { NearTheme { Surface(Modifier.fillMaxSize().background(com.example.findme.ui.theme.AppBackground).safeDrawingPadding()) {
             Column(Modifier.padding(20.dp)) {
-                WeeklyScheduleHeader(emptyList<ScheduleDto>(), 1, { selected = it })
+                val monday = java.time.LocalDate.of(2026, 11, 16)
+                WeeklyScheduleHeader((0L..6L).map(monday::plusDays), 1) { selected = it }
             }
         } } }
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onAllNodes(hasClickAction()).assertCountEquals(7)
         screenshot("weekly-schedule")
         compose.onAllNodes(hasClickAction()).onLast().performClick()
         org.junit.Assert.assertEquals(7, selected)

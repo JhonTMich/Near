@@ -49,9 +49,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -89,7 +91,6 @@ import com.example.findme.domain.model.validateOneOffDate
 import kotlinx.coroutines.CancellationException
 import java.time.Instant
 import com.example.findme.domain.model.timeRangeLabel
-import com.example.findme.domain.model.nextActivityToday
 import com.example.findme.ui.components.*
 import com.example.findme.ui.theme.*
 import java.time.DayOfWeek
@@ -150,16 +151,12 @@ fun AccountContent(state: AccountState, actions: AccountActions,
     LaunchedEffect(state.scheduleRevision, state.signedIn) { if (state.scheduleRevision > 0 && state.signedIn) tab = "Horario" }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
-    // One continuous backdrop behind the top bar and the content, so no seam shows under the header.
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(AppSurface, AppBackground), endY = 1400f))) {
+    Box(Modifier.fillMaxSize().background(AppBackground)) {
     Scaffold(containerColor = Color.Transparent, contentColor = TextPrimary, snackbarHost = { NearSnackbarHost(snackbar) }, topBar = {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BrandMark(Modifier.size(46.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Near", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, letterSpacing = (-.7).sp)
-                Text(state.profile?.takeUnless { it.needsName }?.let { "Hola, ${it.displayName}" } ?: "Siempre cerca de tu gente", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
+            if (!state.signedIn) BrandMark(Modifier.size(40.dp))
+            Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
             if (state.signedIn) {
                 IconButton(onClick = actions::refresh, enabled = !state.busy) {
                     if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
@@ -169,18 +166,18 @@ fun AccountContent(state: AccountState, actions: AccountActions,
         }
     }, bottomBar = {
         if (state.signedIn && state.profile?.needsProfile == false) {
-            Surface(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(28.dp), color = AppSurface,
-                border = BorderStroke(1.dp, CardBorder)) {
+            Column(Modifier.fillMaxWidth().background(AppBackground).navigationBarsPadding()) {
+                HorizontalDivider(color = CardBorder)
                 NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp,
-                    windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.height(76.dp)) {
+                    windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.heightIn(min = 68.dp)) {
                     listOf(Triple("Mi día", "Hoy", Icons.Default.Today), Triple("Horario", "Horario", Icons.Default.CalendarMonth),
                         Triple("Personas", "Personas", Icons.Default.PeopleOutline), Triple("Cuenta", "Perfil", Icons.Default.PersonOutline)).forEach { (id, title, icon) ->
                         NavigationBarItem(selected = tab == id, onClick = { tab = id },
+                            modifier = Modifier.testTag("near-tab-$title"),
                             icon = { Icon(icon, null, Modifier.size(22.dp)) },
                             label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primary,
+                            colors = NavigationBarItemDefaults.colors(selectedIconColor = TextPrimary,
+                                selectedTextColor = TextPrimary, indicatorColor = AccentContainer,
                                 unselectedIconColor = TextMuted, unselectedTextColor = TextMuted))
                     }
                 }
@@ -304,7 +301,8 @@ private fun countdown(seconds: Int) = "%d:%02d".format(Locale.ROOT, seconds / 60
 private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         if (eyebrow.isNotBlank()) Text(eyebrow.uppercase(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp)
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(title, Modifier.testTag("near-heading-$title").semantics { heading() },
+            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         if (subtitle.isNotBlank()) Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -313,8 +311,7 @@ private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
 private fun Panel(content: @Composable ColumnScope.() -> Unit) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, CardBorder),
         colors = CardDefaults.cardColors(containerColor = CardBg)) {
-        Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(CardBg, AppSurface)))
-            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
     }
 }
 
@@ -532,21 +529,55 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
     val profile = state.profile
     val now = profileClock(profile?.zone() ?: ZoneId.systemDefault())
     val status = profile?.let { StatusRepository.calculateStatus(it.displayName, state.schedules, state.statuses, now.dayOfWeek.value, now) }
-    val next = nextActivityToday(state.schedules, now)
-    PageHeading("", "Mi día", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es"))))
+    val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    val next = today.firstOrNull { it.window.start.isAfter(now) }
+    PageHeading("", "Hoy", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es")))
+        .replaceFirstChar { it.titlecase() })
     status?.let { current ->
-        HeroStatusCard(current, heading = "Ahora") {
-            Button(onClick = { editStatus = true }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) {
-                Icon(Icons.Default.Edit, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
-            }
-            if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
-                Text("Volver al horario")
+        val title = when (current) {
+            is UserCurrentStatus.FreeTime -> "Estoy libre"
+            is UserCurrentStatus.InClass -> current.currentSchedule.title
+            is UserCurrentStatus.Override -> current.customLocation
+            is UserCurrentStatus.Error -> "Estado no disponible"
+            is UserCurrentStatus.Loading -> "Consultando actividad…"
+        }
+        val detail = when (current) {
+            is UserCurrentStatus.FreeTime -> next?.let { "Hasta las ${it.window.start.format(hourFormat)}" }
+                ?: "Sin más actividades hoy"
+            is UserCurrentStatus.InClass -> listOf(current.currentSchedule.location,
+                "Termina en ${formatDurationMinutes(current.remainingMinutes)}").filter { it.isNotBlank() }.joinToString(" · ")
+            is UserCurrentStatus.Override -> listOfNotNull(
+                current.customMessage?.takeIf { it.isNotBlank() },
+                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" }
+            ).joinToString(" · ")
+            is UserCurrentStatus.Error -> current.message
+            is UserCurrentStatus.Loading -> ""
+        }
+        Surface(shape = RoundedCornerShape(22.dp), color = AccentContainer, contentColor = TextPrimary) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(title, style = MaterialTheme.typography.headlineLarge)
+                        if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Image(painterResource(R.drawable.near_clock_cat), contentDescription = null,
+                        modifier = Modifier.size(106.dp))
+                }
+                Button(onClick = { editStatus = true }, enabled = !state.busy) {
+                    Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
+                }
+                if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
+                    Text("Volver al horario")
+                }
             }
         }
     }
-    val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
+    Text("Mi día", style = MaterialTheme.typography.headlineSmall)
+    next?.let { upcoming ->
+        Text("Próxima en tu horario", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(upcoming.schedule.title, style = MaterialTheme.typography.titleMedium)
+    }
     val pause = state.pauses.covering(profile?.id, now.toLocalDate())
     if (today.isEmpty()) {
         Panel {
@@ -562,15 +593,13 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     } else {
         pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
-        SectionHeading(Icons.Default.Schedule, "Después")
-        NextActivityCard(next, onOpenSchedule)
-        SectionHeading(Icons.Default.CalendarToday, "Agenda de hoy")
         today.forEachIndexed { index, occurrence ->
             ActivityTimelineCard(occurrence.schedule,
                 active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
                     now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
                 last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
         }
+        TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
     }
     if (editStatus) StatusEditor(state, actions, status as? UserCurrentStatus.Override) { editStatus = false }
 }
@@ -626,16 +655,10 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         dates.map { state.schedules.occurrencesOn(it, zone) }
     }
     val date = dates[day - 1]
-    val distinct = week.flatten().distinctBy { it.schedule.id to it.originalDate }.map { it.schedule }
-    WeeklyScheduleHeader(distinct, day, onDaySelected = { day = it }, showDayTitle = false,
-        today = today, occurrenceCounts = week.map { it.size })
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(days[day - 1], style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        FilledTonalButton(onClick = { editing = null; showEditor = true }, enabled = !state.busy,
-            colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)) {
-            Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Añadir")
-        }
-    }
+    PageHeading("", "Horario", "")
+    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it })
+    HorizontalDivider(color = CardBorder)
+    Text(date.longDate().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.headlineSmall)
     val occurrences = week[day - 1]
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
@@ -659,47 +682,59 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     if (occurrences.isEmpty() && exceptions.isEmpty() && pause == null) {
         EmptyPanel(Icons.Default.EventAvailable, "Espacio para tus planes", "Añade una clase, tu trabajo o una actividad personal.")
     }
+    val dayStart = date.atStartOfDay(zone)
+    val dayEnd = date.plusDays(1).atStartOfDay(zone)
+    var occupiedUntil: ZonedDateTime? = null
     occurrences.forEach { occurrence ->
+        val start = maxOf(dayStart, occurrence.window.start)
+        val end = minOf(dayEnd, occurrence.window.end)
+        occupiedUntil?.takeIf { it.isBefore(start) }?.let { gapStart ->
+            ScheduleTimeRow(gapStart.format(hourFormat)) {
+                Surface(color = FreeSurface, contentColor = StatusGreenText, shape = RoundedCornerShape(12.dp)) {
+                    Text("Tiempo libre · hasta las ${start.format(hourFormat)}",
+                        Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+        occupiedUntil = maxOf(occupiedUntil ?: end, end)
         val schedule = occurrence.schedule
         val recurring = state.schedules.first { it.id == schedule.id }
         val category = ActivityCategory.fromKey(schedule.category)
         val reprogrammed = recurring.occurrenceExceptions.containsKey(occurrence.originalDate.toString())
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                AccentIcon(category.icon, category.accentColor)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
-                    Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        ScheduleTimeRow(if (occurrence.window.start.isBefore(dayStart)) "Desde ayer" else start.format(hourFormat)) {
+            Surface(shape = RoundedCornerShape(14.dp), color = SlateContainer, contentColor = TextPrimary) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
+                        }
+                        var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }, enabled = !state.busy) {
+                                Icon(Icons.Default.MoreVert, "Opciones de ${schedule.title}")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                if (!recurring.isOneOff) DropdownMenuItem(text = { Text("Solo esta fecha") }, onClick = {
+                                    menuOpen = false
+                                    oneOff = recurring.id to occurrence.originalDate
+                                })
+                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Editar" else "Serie semanal") }, onClick = {
+                                    menuOpen = false
+                                    editing = recurring
+                                    showEditor = true
+                                })
+                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Eliminar" else "Eliminar serie") },
+                                    onClick = { menuOpen = false; pendingDelete = recurring })
+                            }
+                        }
+                    }
+                    val activityDetails = listOf(category.label, schedule.modality, schedule.location)
+                        .filter { it.isNotBlank() }.joinToString(" · ")
+                    Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                     if (reprogrammed) StatusPill("Reprogramada", BrandSky)
                     if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusPill(category.label, category.accentColor)
-                StatusPill(schedule.modality.replaceFirstChar(Char::titlecase), TextSecondary)
-            }
-            if (schedule.location.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.LocationOn, null, Modifier.size(16.dp), tint = TextMuted)
-                Text(schedule.location, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
-            HorizontalDivider(color = CardBorder)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (recurring.isOneOff) {
-                    CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        editing = recurring; showEditor = true
-                    }
-                } else {
-                    CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        oneOff = recurring.id to occurrence.originalDate
-                    }
-                    CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        editing = recurring; showEditor = true
-                    }
-                }
-                IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
-                    colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
-                    Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
                 }
             }
         }
@@ -714,6 +749,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             }
             CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy) { oneOff = schedule.id to date }
         }
+    }
+    Button(onClick = { editing = null; showEditor = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Añadir actividad")
     }
     SchedulePausesPanel(state, today, onAdd = { pausing = true }, onDelete = { pendingPauseDelete = it })
     CalendarImportPanel(state, actions, zone, today)
@@ -731,6 +771,16 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+    }
+}
+
+@Composable
+private fun ScheduleTimeRow(time: String, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(time, Modifier.width(55.dp).padding(top = 12.dp), color = TextSecondary,
+            style = MaterialTheme.typography.labelMedium)
+        Box(Modifier.width(1.dp).fillMaxHeight().background(CardBorder))
+        Box(Modifier.weight(1f)) { content() }
     }
 }
 
@@ -1234,32 +1284,63 @@ private fun People(state: AccountState, actions: AccountActions) {
     var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
     if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
-    PageHeading("", "Tu gente", "")
+    PageHeading("", "Personas", "")
     state.lastSync?.let { updated ->
         Text("Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}", color = TextMuted, style = MaterialTheme.typography.labelSmall)
     }
-    FilledTonalButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)) {
-        Icon(Icons.Default.PersonAddAlt, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Conectar con alguien")
-    }
-    if (state.connections.isEmpty()) EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
-    else {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val people = state.connections.mapNotNull { connection ->
+        state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
+    }.sortedBy { controls.nameOf(it).lowercase() }
+    if (state.connections.isEmpty()) {
+        EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
+    } else {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceChip("Todos", selectedGroup == null, onClick = { selectedGroup = null }, enabled = !state.busy)
             state.groups.sortedBy { it.name.lowercase() }.forEach { group ->
-                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy,
-                    leading = { Icon(Icons.Default.Groups, null, Modifier.size(18.dp)) })
-            }
-            state.connections.forEach { connection ->
-                state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }?.let { person ->
-                    ChoiceChip(controls.nameOf(person), selectedGroup == null && state.selectedPerson?.id == person.id,
-                        onClick = { selectedGroup = null; actions.selectPerson(person) },
-                        enabled = !state.busy,
-                        leading = { Icon(if (controls.isMuted(person.id)) Icons.Default.NotificationsOff else Icons.Default.PersonOutline, null, Modifier.size(18.dp)) })
-                }
+                ChoiceChip(group.name, selectedGroup == group.id, onClick = { selectedGroup = group.id }, enabled = !state.busy)
             }
             ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
                 leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
+        if (selectedGroup == null) Column {
+            people.forEach { person ->
+                key(person.id) {
+                    val status = if (state.selectedPerson?.id == person.id) contactStatus(person, state)
+                    else contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
+                        state.othersStatuses.filter { it.userId == person.id })
+                    val (label, ink, background) = when (status) {
+                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)
+                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${status.currentSchedule.title}", BusyInk, BusySurface)
+                        is UserCurrentStatus.Override -> Triple(status.customLocation, TextPrimary, AccentContainer)
+                        is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
+                        is UserCurrentStatus.Loading -> Triple("Consultando…", TextSecondary, InnerBg)
+                    }
+                    HorizontalDivider(color = CardBorder)
+                    Row(Modifier.fillMaxWidth().selectable(selected = state.selectedPerson?.id == person.id,
+                        enabled = !state.busy, role = Role.RadioButton, onClick = { actions.selectPerson(person) })
+                        .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ProfileAvatar(controls.nameOf(person), Modifier.size(48.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(controls.nameOf(person), style = MaterialTheme.typography.titleMedium)
+                            Surface(color = background, contentColor = ink, shape = CircleShape) {
+                                Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        if (controls.isMuted(person.id)) Icon(Icons.Default.NotificationsOff, "Avisos silenciados",
+                            Modifier.size(18.dp), tint = TextMuted)
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = TextSecondary)
+                    }
+                }
+            }
+            HorizontalDivider(color = CardBorder)
+        }
+    }
+    OutlinedButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Default.PersonAddAlt, null, Modifier.size(19.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Conectar con alguien")
     }
     if (state.signals.isNotEmpty()) Panel {
         SectionHeading(Icons.Default.MarkChatUnread, "Te han escrito", "Mensajes recientes · Últimas 24 horas")
@@ -1283,16 +1364,22 @@ private fun People(state: AccountState, actions: AccountActions) {
             val busy = current is UserCurrentStatus.InClass ||
                 (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
             val watching = state.freeAlerts.any { it.targetId == person.id }
+            Surface(shape = RoundedCornerShape(18.dp), color = FreeSurface, contentColor = StatusGreenText) {
+                Row(Modifier.fillMaxWidth().clickable { showAvailability = true }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.EventAvailable, null)
+                    Column(Modifier.weight(1f)) {
+                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium)
+                        Text("Ver disponibilidad con ${person.displayName}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                }
+            }
             HeroStatusCard(current) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Enviar mensaje")
-                }
-                OutlinedButton(onClick = { showAvailability = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.EventAvailable, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Ver horas libres en común")
                 }
                 // Only useful while the person is busy; the server sends one push when that ends.
                 if (visibility?.sharesSchedule != false && watching) Row(verticalAlignment = Alignment.CenterVertically) {

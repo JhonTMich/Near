@@ -23,29 +23,31 @@ data class NearPalette(
     val heroGradient: List<Color>, val statusGreen: Color, val university: Color,
     /** The arched panel under the sign-in forms. */
     val loginPanel: Color,
+    val freeSurface: Color, val busySurface: Color, val busyInk: Color,
 )
 
 val DarkPalette = NearPalette(
-    accent = Color(0xFF8FA6D6), sky = Color(0xFF7FD1B9), slate = Color(0xFFB79BEA), orange = Color(0xFFF2B36B),
-    background = Color(0xFF1E2140), surface = Color(0xFF262A4C), card = Color(0xFF2B3157),
-    cardBorder = Color(0xFF3B4470), inner = Color(0xFF343B66),
-    textPrimary = BrandInk, textSecondary = Color(0xFFC9CCE0), textMuted = Color(0xFF9AA0BD),
-    accentContainer = Color(0xFF34406A), skyContainer = Color(0xFF224A44), slateContainer = Color(0xFF3E3366),
-    heroGradient = listOf(Color(0xFF34406E), Color(0xFF3B3F78), Color(0xFF2B3157)),
-    statusGreen = Color(0xFF7FD8A0), university = Color(0xFF8FB8F0),
-    loginPanel = Color(0xFF181A33),
+    accent = Color(0xFFB9A0FA), sky = Color(0xFFDBECA7), slate = Color(0xFFCEB7EF), orange = Color(0xFFECC48F),
+    background = Color(0xFF1C1824), surface = Color(0xFF25202E), card = Color(0xFF30283C),
+    cardBorder = Color(0xFF51445E), inner = Color(0xFF3B3049),
+    textPrimary = Color(0xFFF7F0E5), textSecondary = Color(0xFFD7CBDE), textMuted = Color(0xFFB7A9C3),
+    accentContainer = Color(0xFF44335E), skyContainer = Color(0xFF303B28), slateContainer = Color(0xFF3E304F),
+    heroGradient = listOf(Color(0xFF44335E), Color(0xFF382946)),
+    statusGreen = Color(0xFFDAEDA0), university = Color(0xFFB4CCF5),
+    loginPanel = Color(0xFF25202E),
+    freeSurface = Color(0xFF303B28), busySurface = Color(0xFF4D3038), busyInk = Color(0xFFFFB7A9),
 )
 
-// Light theme: warm paper background, white cards and darker accents so text keeps its contrast.
 val LightPalette = NearPalette(
-    accent = Color(0xFF4A62A3), sky = Color(0xFF1F7A63), slate = Color(0xFF6B4FB3), orange = Color(0xFFB0640F),
-    background = Color(0xFFF5F3EE), surface = Color(0xFFFFFFFF), card = Color(0xFFFFFFFF),
-    cardBorder = Color(0xFFDDDFEA), inner = Color(0xFFEEF0F7),
-    textPrimary = BrandNight, textSecondary = Color(0xFF4A4F6E), textMuted = Color(0xFF6C7190),
-    accentContainer = Color(0xFFDCE4F7), skyContainer = Color(0xFFD3EFE6), slateContainer = Color(0xFFE9E0FA),
-    heroGradient = listOf(Color(0xFFE2E8F7), Color(0xFFE8E3F7), Color(0xFFF4F5FB)),
-    statusGreen = Color(0xFF237A47), university = Color(0xFF2F68B0),
-    loginPanel = Color(0xFFFFFFFF),
+    accent = Color(0xFF6547C7), sky = Color(0xFF3B541A), slate = Color(0xFF654695), orange = Color(0xFF88511D),
+    background = Color(0xFFF6F2E9), surface = Color(0xFFFFFBF4), card = Color(0xFFFFFBF4),
+    cardBorder = Color(0xFFD7CBD9), inner = Color(0xFFF0E8F2),
+    textPrimary = Color(0xFF282137), textSecondary = Color(0xFF554963), textMuted = Color(0xFF675B72),
+    accentContainer = Color(0xFFE7D9F6), skyContainer = Color(0xFFE0EDAE), slateContainer = Color(0xFFEBDDF5),
+    heroGradient = listOf(Color(0xFFDFC9F1), Color(0xFFEADBF5)),
+    statusGreen = Color(0xFF344B12), university = Color(0xFF355D8B),
+    loginPanel = Color(0xFFFFFBF4),
+    freeSurface = Color(0xFFE0EDAE), busySurface = Color(0xFFF6D6CE), busyInk = Color(0xFF812D29),
 )
 
 val LocalNearPalette = staticCompositionLocalOf { DarkPalette }
@@ -77,3 +79,7 @@ val StatusGreenText: Color @Composable @ReadOnlyComposable get() = palette.statu
 val AccentUniversity: Color @Composable @ReadOnlyComposable get() = palette.university
 val AccentFree: Color @Composable @ReadOnlyComposable get() = palette.orange
 val AccentWork: Color @Composable @ReadOnlyComposable get() = palette.slate
+
+val FreeSurface: Color @Composable @ReadOnlyComposable get() = palette.freeSurface
+val BusySurface: Color @Composable @ReadOnlyComposable get() = palette.busySurface
+val BusyInk: Color @Composable @ReadOnlyComposable get() = palette.busyInk

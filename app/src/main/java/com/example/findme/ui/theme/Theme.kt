@@ -14,20 +14,20 @@ import com.example.findme.data.local.AppTheme
 
 private fun darkColors(p: NearPalette) = darkColorScheme(
     primary = p.accent, onPrimary = BrandNight,
-    primaryContainer = p.accentContainer, onPrimaryContainer = Color(0xFFDCE5FF),
+    primaryContainer = p.accentContainer, onPrimaryContainer = Color(0xFFF7F0E5),
     secondary = p.sky, onSecondary = Color(0xFF0E2B25),
-    secondaryContainer = p.skyContainer, onSecondaryContainer = Color(0xFFC8F2E6),
+    secondaryContainer = p.skyContainer, onSecondaryContainer = Color(0xFFDAEDA0),
     tertiary = p.slate, onTertiary = Color(0xFF241A45),
     tertiaryContainer = p.slateContainer, onTertiaryContainer = Color(0xFFE8DDFF),
     background = p.background, onBackground = p.textPrimary,
     surface = p.surface, onSurface = p.textPrimary,
     surfaceVariant = p.inner, onSurfaceVariant = p.textSecondary,
-    surfaceContainerLowest = Color(0xFF1A1C36),
-    surfaceContainerLow = Color(0xFF232747),
+    surfaceContainerLowest = Color(0xFF17131F),
+    surfaceContainerLow = Color(0xFF211B2A),
     surfaceContainer = p.surface,
     surfaceContainerHigh = p.card,
     surfaceContainerHighest = p.inner,
-    outline = Color(0xFF6E78A6), outlineVariant = p.cardBorder,
+    outline = Color(0xFF9585A4), outlineVariant = p.cardBorder,
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
     inverseSurface = BrandCream, inverseOnSurface = BrandNight, inversePrimary = BrandIconBlue,
@@ -36,9 +36,9 @@ private fun darkColors(p: NearPalette) = darkColorScheme(
 
 private fun lightColors(p: NearPalette) = lightColorScheme(
     primary = p.accent, onPrimary = Color.White,
-    primaryContainer = p.accentContainer, onPrimaryContainer = Color(0xFF1B2B57),
+    primaryContainer = p.accentContainer, onPrimaryContainer = Color(0xFF332149),
     secondary = p.sky, onSecondary = Color.White,
-    secondaryContainer = p.skyContainer, onSecondaryContainer = Color(0xFF0B3A2E),
+    secondaryContainer = p.skyContainer, onSecondaryContainer = Color(0xFF344B12),
     tertiary = p.slate, onTertiary = Color.White,
     tertiaryContainer = p.slateContainer, onTertiaryContainer = Color(0xFF2C1A5C),
     background = p.background, onBackground = p.textPrimary,
@@ -49,10 +49,10 @@ private fun lightColors(p: NearPalette) = lightColorScheme(
     surfaceContainer = p.surface,
     surfaceContainerHigh = p.card,
     surfaceContainerHighest = p.inner,
-    outline = Color(0xFF8A90AE), outlineVariant = p.cardBorder,
+    outline = Color(0xFF84758F), outlineVariant = p.cardBorder,
     error = Color(0xFFBA1A1A), onError = Color.White,
     errorContainer = Color(0xFFFFDAD6), onErrorContainer = Color(0xFF410002),
-    inverseSurface = BrandNight, inverseOnSurface = BrandCream, inversePrimary = Color(0xFF8FA6D6),
+    inverseSurface = BrandNight, inverseOnSurface = BrandCream, inversePrimary = Color(0xFFB9A0FA),
     surfaceTint = p.accent
 )
 
