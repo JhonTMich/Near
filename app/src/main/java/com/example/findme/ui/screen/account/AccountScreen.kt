@@ -757,6 +757,10 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     exceptions.forEach { (schedule, exception) ->
         Panel {
             Text(schedule.title, fontWeight = FontWeight.Bold)
+            val source = state.profiles.firstOrNull { it.id == schedule.sourceOwnerId }
+            if (source != null) {
+                Text("Horario de ${source.displayName}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
             StatusPill(if (exception.cancelled) "Cancelada" else "Reprogramada",
                 if (exception.cancelled) MaterialTheme.colorScheme.error else BrandSky)
             exception.date?.takeUnless { exception.cancelled }?.let {
@@ -1309,6 +1313,16 @@ private fun People(state: AccountState, actions: AccountActions) {
     val people = state.connections.mapNotNull { connection ->
         state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
     }.sortedBy { controls.nameOf(it).lowercase() }
+    val pendingFollowers = state.scheduleFollowRequests.orEmpty()
+        .filter { it.leaderId == state.profile?.id && !it.approved }
+        .map { it.followerId }.toSet()
+    people.filter { it.id in pendingFollowers }.forEach { requester ->
+        OutlinedButton(
+            onClick = { selectedGroup = null; actions.selectPerson(requester) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Solicitud de horario de ${controls.nameOf(requester)}") }
+    }
     if (state.connections.isEmpty()) {
         EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
     } else {
