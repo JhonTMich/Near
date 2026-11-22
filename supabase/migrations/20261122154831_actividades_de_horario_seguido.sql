@@ -81,6 +81,7 @@ returns void language plpgsql security definer set search_path = '' as $$
 declare
     caller uuid := auth.uid();
     request public.schedule_follow_requests;
+    today date;
 begin
     select * into request from public.schedule_follow_requests r
     where r.id = end_schedule_follow.request_id and r.follower_id = caller
@@ -88,6 +89,8 @@ begin
     if not found then return; end if;
 
     if request.approved and private.connection_shares(request.leader_id, 'schedule') then
+        select (now() at time zone p.timezone)::date into today
+        from public.account_profiles p where p.id = caller;
         insert into public.personal_schedule (
             id, user_id, day_of_week, start_time, end_time, title, location, category,
             modality, ends_next_day, one_off_date, occurrence_exceptions
@@ -101,6 +104,7 @@ begin
         join public.personal_schedule s on s.id = a.source_id and s.user_id = request.leader_id
         cross join lateral jsonb_populate_record(s, a.customization - array['id', 'user_id', 'one_off_date', 'occurrence_exceptions', 'weekly_span']) edited
         where a.request_id = request.id
+            and (s.one_off_date is null or s.one_off_date >= today)
             and (keep_all or a.customization <> '{}'::jsonb or a.occurrence_changes <> '{}'::jsonb);
     end if;
 
@@ -132,8 +136,8 @@ begin
         and private.connection_shares(s.source_owner_id, 'schedule');
     if not found then raise exception 'Followed activity unavailable'; end if;
     if activity.day_of_week <> extract(isodow from original_date)::int
-        or (activity.one_off_date is not null and activity.one_off_date <> original_date) then
-        raise exception 'Invalid occurrence date';
+        or activity.one_off_date is not null then
+        raise exception 'Invalid occurrence date' using errcode = 'FM004';
     end if;
     if change is null or change = 'null'::jsonb then
         update public.followed_schedule_activities
@@ -149,7 +153,7 @@ begin
         overnight := coalesce((change->>'ends_next_day')::boolean, false);
         if target_date is null or starts is null or ends is null
             or (overnight and ends >= starts) or (not overnight and ends <= starts) then
-            raise exception 'Invalid occurrence change';
+            raise exception 'Invalid occurrence change' using errcode = 'FM004';
         end if;
         change := jsonb_build_object('date', to_char(target_date, 'YYYY-MM-DD'),
             'start_time', starts, 'end_time', ends, 'ends_next_day', overnight);
