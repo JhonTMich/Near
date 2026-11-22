@@ -64,8 +64,8 @@ class AccountUiTest {
         }
         compose.onNodeWithText("Mi día").performScrollTo().assertIsDisplayed()
         screenshot("brand-my-day", composeOnly = true)
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithText("Horario").assertIsDisplayed()
         screenshot("brand-schedule", composeOnly = true)
         compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithText("Personas").assertIsDisplayed()
@@ -134,10 +134,10 @@ class AccountUiTest {
                 }
             }
         }, snapshot = state.copy(schedules = listOf(schedule, work)))
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithText("Horario").assertIsDisplayed()
         screenshot("account-schedule")
-        compose.onNodeWithText("Añadir").performScrollTo().performClick()
+        compose.onNodeWithText("Añadir actividad").performScrollTo().performClick()
         val heading = compose.onNodeWithText("Nueva actividad")
         repeat(3) {
             heading.performTouchInput { swipeDown(endY = bottom + 350f) }
@@ -204,8 +204,8 @@ class AccountUiTest {
             }
         }
         compose.setContent { NearTheme { AccountContent(snapshot.value, actions) } }
-        compose.onNodeWithText("Horario").performClick()
-        compose.onNodeWithText("Añadir").performScrollTo().performClick()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
+        compose.onNodeWithText("Añadir actividad").performScrollTo().performClick()
         compose.onNodeWithText("Título").performTextReplacement("Clase nueva")
         val save = compose.onNodeWithText("Guardar actividad")
         save.performSemanticsAction(SemanticsActions.OnClick)
@@ -231,7 +231,7 @@ class AccountUiTest {
                 saved = activities.single()
             }
         }, snapshot = state.copy(schedules = listOf(night)))
-        compose.onNodeWithText("Horario").performClick()
+        compose.onNodeWithTag("near-tab-Horario").performClick()
         compose.onNodeWithText("(+1 día)", substring = true).assertExists()
         compose.onNodeWithText("Serie semanal").performScrollTo().performClick()
         val overnight = compose.onNodeWithText("Termina al día siguiente")
@@ -421,7 +421,7 @@ class AccountUiTest {
         compose.onNodeWithText("Nada más por hoy").assertDoesNotExist()
         screenshot("blue-today-next", composeOnly = true)
         compose.onNodeWithText("Ver horario").performScrollTo().performClick()
-        compose.onNodeWithText("Tu semana").assertIsDisplayed()
+        compose.onNodeWithText("Horario").assertIsDisplayed()
         compose.onNodeWithTag("near-tab-Hoy").performClick()
         current.value = state.copy(schedules = emptyList())
         compose.onNodeWithText("Nada más por hoy").performScrollTo().assertIsDisplayed()

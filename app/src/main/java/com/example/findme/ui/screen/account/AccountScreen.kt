@@ -653,16 +653,10 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         dates.map { state.schedules.occurrencesOn(it, zone) }
     }
     val date = dates[day - 1]
-    val distinct = week.flatten().distinctBy { it.schedule.id to it.originalDate }.map { it.schedule }
-    WeeklyScheduleHeader(distinct, day, onDaySelected = { day = it }, showDayTitle = false,
-        today = today, occurrenceCounts = week.map { it.size })
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(days[day - 1], style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        FilledTonalButton(onClick = { editing = null; showEditor = true }, enabled = !state.busy,
-            colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)) {
-            Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Añadir")
-        }
-    }
+    PageHeading("", "Horario", "")
+    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it })
+    HorizontalDivider(color = CardBorder)
+    Text(date.longDate().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.headlineSmall)
     val occurrences = week[day - 1]
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
@@ -686,47 +680,63 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     if (occurrences.isEmpty() && exceptions.isEmpty() && pause == null) {
         EmptyPanel(Icons.Default.EventAvailable, "Espacio para tus planes", "Añade una clase, tu trabajo o una actividad personal.")
     }
+    val dayStart = date.atStartOfDay(zone)
+    val dayEnd = date.plusDays(1).atStartOfDay(zone)
+    var occupiedUntil: ZonedDateTime? = null
     occurrences.forEach { occurrence ->
+        val start = maxOf(dayStart, occurrence.window.start)
+        val end = minOf(dayEnd, occurrence.window.end)
+        occupiedUntil?.takeIf { it.isBefore(start) }?.let { gapStart ->
+            ScheduleTimeRow(gapStart.format(hourFormat)) {
+                Surface(color = FreeSurface, contentColor = StatusGreenText, shape = RoundedCornerShape(12.dp)) {
+                    Text("Tiempo libre · hasta las ${start.format(hourFormat)}",
+                        Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+        occupiedUntil = maxOf(occupiedUntil ?: end, end)
         val schedule = occurrence.schedule
         val recurring = state.schedules.first { it.id == schedule.id }
         val category = ActivityCategory.fromKey(schedule.category)
         val reprogrammed = recurring.occurrenceExceptions.containsKey(occurrence.originalDate.toString())
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                AccentIcon(category.icon, category.accentColor)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
-                    Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    if (reprogrammed) StatusPill("Reprogramada", BrandSky)
-                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusPill(category.label, category.accentColor)
-                StatusPill(schedule.modality.replaceFirstChar(Char::titlecase), TextSecondary)
-            }
-            if (schedule.location.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.LocationOn, null, Modifier.size(16.dp), tint = TextMuted)
-                Text(schedule.location, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
-            HorizontalDivider(color = CardBorder)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (recurring.isOneOff) {
-                    CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        editing = recurring; showEditor = true
-                    }
-                } else {
-                    CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        oneOff = recurring.id to occurrence.originalDate
-                    }
-                    CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                        editing = recurring; showEditor = true
+        ScheduleTimeRow(if (occurrence.window.start.isBefore(dayStart)) "Desde ayer" else start.format(hourFormat)) {
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AccentIcon(category.icon, category.accentColor)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(schedule.timeRangeLabel(day), color = category.accentColor, style = MaterialTheme.typography.labelLarge)
+                        Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (reprogrammed) StatusPill("Reprogramada", BrandSky)
+                        if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
                     }
                 }
-                IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
-                    colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
-                    Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusPill(category.label, category.accentColor)
+                    StatusPill(schedule.modality.replaceFirstChar(Char::titlecase), TextSecondary)
+                }
+                if (schedule.location.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.LocationOn, null, Modifier.size(16.dp), tint = TextMuted)
+                    Text(schedule.location, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                HorizontalDivider(color = CardBorder)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (recurring.isOneOff) {
+                        CardAction(Icons.Default.Edit, "Editar", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                            editing = recurring; showEditor = true
+                        }
+                    } else {
+                        CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                            oneOff = recurring.id to occurrence.originalDate
+                        }
+                        CardAction(Icons.Default.Edit, "Serie semanal", enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                            editing = recurring; showEditor = true
+                        }
+                    }
+                    IconButton(onClick = { pendingDelete = recurring }, enabled = !state.busy,
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = .10f))) {
+                        Icon(Icons.Default.DeleteOutline, if (recurring.isOneOff) "Eliminar ${schedule.title}" else "Eliminar serie de ${schedule.title}",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = .85f))
+                    }
                 }
             }
         }
@@ -741,6 +751,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             }
             CardAction(Icons.Default.EventRepeat, "Solo esta fecha", enabled = !state.busy) { oneOff = schedule.id to date }
         }
+    }
+    Button(onClick = { editing = null; showEditor = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Añadir actividad")
     }
     SchedulePausesPanel(state, today, onAdd = { pausing = true }, onDelete = { pendingPauseDelete = it })
     CalendarImportPanel(state, actions, zone, today)
@@ -758,6 +773,16 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+    }
+}
+
+@Composable
+private fun ScheduleTimeRow(time: String, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(time, Modifier.width(55.dp).padding(top = 12.dp), color = TextSecondary,
+            style = MaterialTheme.typography.labelMedium)
+        Box(Modifier.width(1.dp).fillMaxHeight().background(CardBorder))
+        Box(Modifier.weight(1f)) { content() }
     }
 }
 
