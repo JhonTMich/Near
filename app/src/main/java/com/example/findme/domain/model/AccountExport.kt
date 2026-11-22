@@ -15,7 +15,10 @@ object AccountExport {
         connections: List<PersonConnection>,
         people: List<AccountProfile>,
         received: List<ConnectionSignal>,
-        exportedAt: String
+        exportedAt: String,
+        pauses: List<SchedulePause> = emptyList(),
+        groups: List<PersonGroup> = emptyList(),
+        groupMembers: List<PersonGroupMember> = emptyList()
     ): String {
         val names = people.associate { it.id to it.displayName }
         return json.encodeToString(JsonObject.serializer(), buildJsonObject {
@@ -26,12 +29,18 @@ object AccountExport {
                 put("timezone", profile.timezone)
             }
             putJsonArray("schedule") {
-                schedules.filter { it.userId == profile.id }.sortedWith(compareBy({ it.dayOfWeek }, { it.startTime })).forEach { row ->
+                schedules.filter { it.userId == profile.id }.sortedWith(compareBy({ it.oneOffDate.orEmpty() }, { it.dayOfWeek }, { it.startTime })).forEach { row ->
                     addJsonObject {
                         put("day_of_week", row.dayOfWeek); put("start_time", row.startTime); put("end_time", row.endTime)
                         put("ends_next_day", row.endsNextDay); put("title", row.title); put("location", row.location)
                         put("category", row.category); put("modality", row.modality)
+                        row.oneOffDate?.let { put("only_on", it) }
                     }
+                }
+            }
+            putJsonArray("schedule_pauses") {
+                pauses.filter { it.userId == profile.id }.sortedBy { it.startDate }.forEach { pause ->
+                    addJsonObject { put("title", pause.title); put("start_date", pause.startDate); put("end_date", pause.endDate) }
                 }
             }
             putJsonArray("shared_status") {
@@ -45,6 +54,16 @@ object AccountExport {
             putJsonArray("connections") {
                 connections.forEach { connection ->
                     addJsonObject { put("person", names[connection.otherPerson(profile.id)] ?: "Persona sin nombre visible") }
+                }
+            }
+            putJsonArray("groups") {
+                groups.sortedBy { it.name }.forEach { group ->
+                    addJsonObject {
+                        put("name", group.name)
+                        putJsonArray("people") {
+                            groupMembers.filter { it.groupId == group.id }.forEach { add(names[it.memberId] ?: "Persona sin nombre visible") }
+                        }
+                    }
                 }
             }
             putJsonArray("received_messages") {

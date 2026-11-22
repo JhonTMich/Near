@@ -40,10 +40,8 @@ class ConnectionWidgetReceiver : GlanceAppWidgetReceiver() {
     }
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
-        val work = androidx.work.WorkManager.getInstance(context)
-        work.cancelUniqueWork("GlanceWidgetUpdateWorker")
-        work.cancelUniqueWork("WidgetManualRefresh")
-        work.cancelUniqueWork("WidgetStatusBoundary")
+        // The people widget shares the same work; stop it only when neither kind is left.
+        NearWidgets.cancelWorkIfNoneLeft(context)
     }
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
@@ -162,7 +160,7 @@ class ConnectionWidget : GlanceAppWidget() {
 
 /** Signed out: the searching mascot asks "¿Dónde está tu gente?" and invites to sign in. */
 @Composable
-private fun SignedOutWidget(context: Context, width: Float, height: Float) {
+internal fun SignedOutWidget(context: Context, width: Float, height: Float) {
     val layout = SignedOutLayout.fit(width, height, context.resources.configuration.fontScale)
     val openApp = actionStartActivity(Intent(context, MainActivity::class.java))
     val ink = Color(0xFF1F2A44)

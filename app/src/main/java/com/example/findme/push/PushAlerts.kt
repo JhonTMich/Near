@@ -2,15 +2,20 @@ package com.example.findme.push
 
 import com.example.findme.data.local.AccountAlert
 import com.example.findme.data.local.AccountSettings
+import com.example.findme.domain.model.Plans
 import com.example.findme.util.NotificationHelper
 
 /** What one push (FCM data message sent by the send-push function) shows, before the switches are checked. */
 /** [person] is the connected person the alert is about: the sender of a message, or whose status or activity changed. */
+/** [requested] alerts were asked for explicitly, so the alert switches and an open app do not hide them. */
 data class PushAlert(val alert: AccountAlert, val channel: NotificationHelper.Channel, val id: Int, val title: String, val text: String,
-    val person: String)
+    val person: String, val requested: Boolean = false)
 
 object PushAlerts {
     const val STATUS_ENDED = "Vuelve a mostrar su horario."
+    const val NOW_FREE = "Ya está libre. Es un buen momento para escribirle."
+    fun freeId(personId: String) = "free:$personId".hashCode()
+    fun planId(planId: String) = "plan:$planId".hashCode()
 
     fun statusText(location: String, message: String?) =
         listOfNotNull(location.trim(), message?.trim()?.takeIf { it.isNotEmpty() }).joinToString(" · ")
@@ -42,11 +47,30 @@ object PushAlerts {
                 PushAlert(AccountAlert.Activities, NotificationHelper.Channel.Activities, NotificationHelper.personId(person ?: return null),
                     name, activityText(title, data["location"]), person)
             }
+            "free" -> PushAlert(AccountAlert.Activities, NotificationHelper.Channel.Requested,
+                freeId(person ?: return null), name, NOW_FREE, person, requested = true)
+            "plan" -> {
+                val id = data["id"] ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                val time = Plans.whenText(data["starts_at"] ?: return null, data["ends_at"], java.time.ZoneId.systemDefault())
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Messages, planId(id), "$name te propone un plan",
+                    "$title · $time", person ?: return null)
+            }
+            "plan_answer" -> {
+                val id = data["id"] ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                val time = Plans.whenText(data["starts_at"] ?: return null, null, java.time.ZoneId.systemDefault())
+                val accepted = data["accepted"] == "true"
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Requested, planId(id),
+                    if (accepted) "$name aceptó tu plan" else "$name no puede",
+                    if (accepted) "$title · $time. Ya está en el horario de ambos." else "$title · $time", person ?: return null,
+                    requested = true)
+            }
             else -> null
         }
     }
 
-    fun allowed(alert: PushAlert, settings: AccountSettings) = when (alert.alert) {
+    fun allowed(alert: PushAlert, settings: AccountSettings) = alert.requested || when (alert.alert) {
         AccountAlert.Activities -> settings.activities
         AccountAlert.Statuses -> settings.statuses
         AccountAlert.Messages -> settings.messages

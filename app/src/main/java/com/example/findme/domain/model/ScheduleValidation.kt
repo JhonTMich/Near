@@ -19,6 +19,13 @@ fun validateSchedule(day: Int, start: String, end: String, title: String, endsNe
     return null
 }
 
+/** A one-off activity is planned from today up to a year ahead, the same window the server accepts. */
+fun validateOneOffDate(date: java.time.LocalDate, today: java.time.LocalDate): String? = when {
+    date.isBefore(today) -> "Elige hoy o una fecha futura."
+    date.isAfter(today.plusDays(366)) -> "Elige una fecha dentro del próximo año."
+    else -> null
+}
+
 fun findScheduleConflict(
     schedules: List<ScheduleDto>,
     activity: ScheduleDto
@@ -30,11 +37,34 @@ fun findScheduleConflict(
         if ((virtualClass && other.category == "work") || (activity.category == "work" && otherVirtualClass)) {
             return@firstOrNull false
         }
-        activity.overlaps(other)
+        when {
+            activity.isOneOff -> activity.clashesOnItsDate(other)
+            // A one-off activity that already passed no longer blocks anything.
+            other.isOneOff -> other.oneOffDate.orEmpty() >= java.time.LocalDate.now().minusDays(1).toString() &&
+                other.clashesOnItsDate(activity)
+            else -> activity.overlaps(other)
+        }
     }
 }
 
+/**
+ * Compares this one-off activity with [other] around its date. Pauses are ignored, like on the server,
+ * so a clash is reported even if the weekly activity is paused that day.
+ */
+private fun ScheduleDto.clashesOnItsDate(other: ScheduleDto): Boolean {
+    val date = runCatching { java.time.LocalDate.parse(oneOffDate) }.getOrNull() ?: return false
+    val zone = java.time.ZoneOffset.UTC
+    val mine = occurrences(date, date, zone).map { it.window }.toList()
+    val theirs = other.withoutPauses().occurrences(date.minusDays(1), date.plusDays(1), zone).map { it.window }.toList()
+    return mine.any { m -> theirs.any { t -> m.start.isBefore(t.end) && t.start.isBefore(m.end) } }
+}
+
 fun ScheduleDto.conflictMessage(): String {
+    oneOffDate?.let { value ->
+        val date = runCatching { java.time.LocalDate.parse(value) }.getOrNull()
+        val label = date?.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es"))) ?: value
+        return "Coincide con «$title» el $label (${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}). Cambia la fecha o las horas."
+    }
     val day = DayOfWeek.of(dayOfWeek).getDisplayName(TextStyle.FULL, Locale.forLanguageTag("es"))
     val overnight = if (endsNextDay) " del día siguiente" else ""
     return "Coincide con «$title» el $day (${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}$overnight). Cambia el horario o el día."

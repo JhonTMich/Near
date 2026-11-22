@@ -9,5 +9,7 @@ data class ScheduleException(
     val date: String? = null,
     @SerialName("start_time") val startTime: String? = null,
     @SerialName("end_time") val endTime: String? = null,
-    @SerialName("ends_next_day") val endsNextDay: Boolean = false
+    @SerialName("ends_next_day") val endsNextDay: Boolean = false,
+    /** Added on the device from a [SchedulePause]; never stored on the server. */
+    val paused: Boolean = false
 )

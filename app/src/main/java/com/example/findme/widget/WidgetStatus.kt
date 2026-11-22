@@ -24,7 +24,9 @@ data class WidgetStatus(
     val scene: WidgetScene,
     /** Short headline that describes the scene, e.g. "En clase". */
     val label: String,
-    val shared: Boolean = false
+    val shared: Boolean = false,
+    /** No activity in progress and no shared status. */
+    val free: Boolean = false
 )
 
 private val workWords = listOf("trabaj", "oficina", "reunión", "reunion", "turno", "chamba")
@@ -90,6 +92,6 @@ fun widgetStatus(name: String, schedules: List<ScheduleDto>, statuses: List<Stat
         is UserCurrentStatus.Override -> WidgetStatus(state.customLocation,
             state.customMessage?.takeIf { it.isNotBlank() } ?: "Estado compartido", next,
             sceneForSharedStatus("${state.customLocation} ${state.customMessage.orEmpty()}"), "Estado compartido", shared = true)
-        else -> WidgetStatus("Libre", "Sin actividad", next, WidgetScene.FREE, "Tiempo libre")
+        else -> WidgetStatus("Libre", "Sin actividad", next, WidgetScene.FREE, "Tiempo libre", free = true)
     }
 }

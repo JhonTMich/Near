@@ -24,9 +24,9 @@ fun commonFreeTime(
     val firstDay = now.atZone(viewerZone).toLocalDate()
     val through = firstDay.plusDays(7).atStartOfDay(viewerZone).toInstant()
     val firstMinute = now.truncatedTo(ChronoUnit.MINUTES).let { if (it < now) it.plusSeconds(60) else it }
-    val busy = (schedules.viewer.flatMap { row ->
+    val busy = (schedules.viewer.withPauses(schedules.viewerPauses).flatMap { row ->
         row.occurrences(firstDay.minusDays(1), firstDay.plusDays(6), viewerZone).toList()
-    } + schedules.contact.flatMap { row ->
+    } + schedules.contact.withPauses(schedules.contactPauses).flatMap { row ->
         val start = now.atZone(contactZone).toLocalDate().minusDays(1)
         val end = through.atZone(contactZone).toLocalDate()
         row.occurrences(start, end, contactZone).toList()

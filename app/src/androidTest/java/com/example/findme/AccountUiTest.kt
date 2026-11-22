@@ -360,6 +360,36 @@ class AccountUiTest {
         assertTrue(submitted)
     }
 
+    @Test fun recoveryLinkRequiresNewPasswordBeforeOpeningAccount() {
+        var saved = ""
+        var cancelled = false
+        show(object : AccountActions {
+            override fun setRecoveredPassword(password: String, confirmation: String) { saved = password }
+            override fun cancelPasswordRecovery() { cancelled = true }
+        }, state.copy(passwordRecovery = true))
+        compose.onNodeWithText("Elige una contraseña nueva").assertIsDisplayed()
+        // Nothing of the account is reachable around the page.
+        compose.onNodeWithText("Hoy").assertDoesNotExist()
+        compose.onNodeWithText("Perfil").assertDoesNotExist()
+        screenshot("blue-new-password", composeOnly = true)
+        compose.onNodeWithText("Nueva contraseña").performScrollTo().performTextInput("local-test-password")
+        compose.onNodeWithText("Confirmar contraseña").performScrollTo().performTextInput("other-password")
+        compose.onNodeWithText("Guardar contraseña").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Confirmar contraseña").performScrollTo().performTextReplacement("local-test-password")
+        compose.onNodeWithText("Guardar contraseña").performScrollTo().performClick()
+        assertEquals("local-test-password", saved)
+        compose.onNodeWithText("Cancelar y cerrar sesión").performScrollTo().performClick()
+        assertTrue(cancelled)
+    }
+
+    @Test fun recoveryEmailCountsDownBeforeResending() {
+        show(snapshot = AccountState(initializing = false,
+            recoveryEmailSent = SentEmail("person@example.test", android.os.SystemClock.elapsedRealtime())))
+        compose.onNodeWithText("¿Olvidaste tu contraseña?").performScrollTo().performClick()
+        compose.onNodeWithText("Enviamos el enlace a person@example.test", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Reenviar en", substring = true).performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun confirmationRecoveryBelongsToRegistrationAndCanGoBack() {
         var sentEmail = ""
         compose.setContent { NearTheme {

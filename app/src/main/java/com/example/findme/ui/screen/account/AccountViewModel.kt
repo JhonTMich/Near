@@ -9,6 +9,7 @@ import com.example.findme.data.repository.AccountRepository
 import com.example.findme.domain.model.validateSchedule
 import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
+import com.example.findme.domain.model.withPauses
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +49,10 @@ data class AccountState(
     val confirmationEmail: String? = null,
     /** Signed in through a recovery link; the new password has not been chosen yet. */
     val passwordRecovery: Boolean = false,
+    /** Address and [android.os.SystemClock.elapsedRealtime] of the last recovery email sent. */
+    val recoveryEmailSent: SentEmail? = null,
+    /** [android.os.SystemClock.elapsedRealtime] of the last confirmation email sent. */
+    val confirmationSentAt: Long? = null,
     val loginRevision: Int = 0,
     val profile: AccountProfile? = null,
     val schedules: List<ScheduleDto> = emptyList(),
@@ -64,11 +69,31 @@ data class AccountState(
     val messages: List<QuickMessage> = emptyList(),
     val signals: List<ConnectionSignal> = emptyList(),
     val invitation: ConnectionInvitation? = null,
-    val preferences: List<ConnectionPreference> = emptyList()
+    val preferences: List<ConnectionPreference> = emptyList(),
+    /** Own pauses and those of people who share their schedule. Already applied to the schedules above. */
+    val pauses: List<SchedulePause> = emptyList(),
+    /** People this account asked to be told about when they are free. */
+    val freeAlerts: List<FreeAlert> = emptyList(),
+    /** Plans sent or received by this account. */
+    val plans: List<PlanProposal> = emptyList(),
+    /** Places saved on this phone for the automatic status; they are never sent anywhere. */
+    val autoPlaces: List<com.example.findme.places.AutoPlace> = emptyList(),
+    /** Private groups of this account and who is in each. */
+    val groups: List<PersonGroup> = emptyList(),
+    val groupMembers: List<PersonGroupMember> = emptyList(),
+    /** Schedules and statuses of every connected person (not only [selectedPerson]), for the group view. */
+    val othersSchedules: List<ScheduleDto> = emptyList(),
+    val othersStatuses: List<StatusOverrideDto> = emptyList()
 ) {
+    fun membersOf(groupId: String): List<String> = groupMembers.filter { it.groupId == groupId }.map { it.memberId }
     /** Nicknames, sharing choices and silenced people, as decided by the signed-in person. */
     val controls: ConnectionControls get() = ConnectionControls(profile?.id.orEmpty(), connections, preferences)
 }
+
+data class SentEmail(val address: String, val at: Long)
+
+/** Wait before offering to send the same kind of email again; the server also limits how often it sends. */
+const val EMAIL_RESEND_SECONDS = 60
 
 private const val SAVE_FAILED = "No se pudieron guardar los datos. Inténtalo de nuevo."
 private const val LOAD_FAILED = "No se pudieron cargar tus datos. Inténtalo de nuevo en unos minutos."
@@ -93,14 +118,22 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 // Initializing has no user yet; wait until the SDK finishes restoring its session.
                 if (it is io.github.jan.supabase.auth.status.SessionStatus.Initializing) return@collect
                 if (user == null) {
-                    _state.value = AccountState(initializing = false)
+                    PendingPasswordRecovery.clear(getApplication())
+                    launch { runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), null) } }
+                    // Keep the resend countdowns: signing out does not let the server send sooner.
+                    _state.value = AccountState(initializing = false,
+                        recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
                     com.example.findme.widget.WidgetStore.clear(getApplication())
                     AccountCache.clear(getApplication())
                 }
                 else if (_state.value.profile?.id != user.id) {
-                    _state.update { old -> old.copy(initializing = false, signedIn = true) }
+                    // A recovery link that was opened but never finished still demands the new password.
+                    val recovering = PendingPasswordRecovery.isPending(getApplication(), user.id)
+                    _state.update { old -> old.copy(initializing = false, signedIn = true,
+                        passwordRecovery = old.passwordRecovery || recovering) }
                     // This device receives this account's pushes from now on.
                     launch { com.example.findme.push.PushTokens.register() }
+                    launch { loadAutoPlaces(user.id) }
                     // Show the last successful sync at once, then refresh it from the network.
                     restoreCache(user.id)
                     refresh()
@@ -142,6 +175,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM002" -> "Demasiados intentos seguidos. Espera unos minutos e inténtalo de nuevo."
                     "FM004" -> "La fecha o las horas de esta actividad no son válidas. Revisa la ocurrencia."
                     "FM003" -> "La zona horaria del teléfono no es válida. Revisa la configuración de fecha y hora."
+                    "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
@@ -158,13 +192,21 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun requestPasswordReset(email: String) = perform {
         require(com.example.findme.domain.model.Registration.isEmail(email)) { "Introduce un correo válido." }
         repository.requestPasswordReset(email)
-        _state.update { it.copy(notice = "Si ese correo tiene una cuenta, recibirás un enlace para elegir otra contraseña. " +
+        _state.update { it.copy(recoveryEmailSent = SentEmail(email.trim(), android.os.SystemClock.elapsedRealtime()),
+            notice = "Si ese correo tiene una cuenta, recibirás un enlace para elegir otra contraseña. " +
             "Ábrelo en este teléfono y revisa también la carpeta de spam.") }
     }
     /** Called when the recovery email's link opens the app. */
     fun completePasswordRecovery(code: String) = perform(failure = LOAD_FAILED) {
-        repository.exchangeRecoveryCode(code)
-        _state.update { it.copy(signedIn = true, passwordRecovery = true) }
+        // Set before the session appears, so the app never shows the account behind the new-password page.
+        _state.update { it.copy(passwordRecovery = true) }
+        try { repository.exchangeRecoveryCode(code) }
+        catch (error: Exception) {
+            _state.update { it.copy(passwordRecovery = PendingPasswordRecovery.isPending(getApplication(), repository.auth.currentUserOrNull()?.id.orEmpty())) }
+            throw error
+        }
+        PendingPasswordRecovery.mark(getApplication(), repository.userId())
+        _state.update { it.copy(signedIn = true, passwordRecovery = true, recoveryEmailSent = null) }
         // The session listener's refresh is skipped while this action is running, so load here.
         load()
     }
@@ -174,9 +216,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun setRecoveredPassword(password: String, confirmation: String) = perform {
         require(password == confirmation) { "Las contraseñas no coinciden." }
         repository.setPassword(password)
+        PendingPasswordRecovery.clear(getApplication())
         _state.update { it.copy(passwordRecovery = false, notice = "Contraseña actualizada. Ya puedes usarla para entrar.") }
     }
-    override fun cancelPasswordRecovery() { _state.update { it.copy(passwordRecovery = false) } }
+    /** Leaving without a new password signs out: the link's session must not stand in for the password. */
+    override fun cancelPasswordRecovery() = logout()
     override fun login(username: String, password: String) = perform(failure = LOAD_FAILED) {
         require(com.example.findme.domain.model.Username.isValid(username) && password.isNotBlank()) { "Introduce un usuario válido y tu contraseña." }
         repository.signIn(username, password)
@@ -196,6 +240,29 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         null
     }
 
+    /** Zone the server last refused, so an unknown device zone is not sent again on every refresh. */
+    private var refusedTimezone: String? = null
+
+    /**
+     * The profile's zone was fixed when the account was created, so a wrong phone setting or a trip
+     * left schedules, reminders and pushes shifted. Keep it equal to the phone's zone.
+     */
+    private suspend fun followPhoneTimezone(profile: AccountProfile): AccountProfile {
+        val zone = ZoneId.systemDefault().id
+        if (profile.timezone == zone || zone == refusedTimezone) return profile
+        return try { repository.updateTimezone(zone) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
+            // The server rejects zones it does not know (FM003); a network failure is retried next refresh.
+            android.util.Log.w("AccountViewModel", "Time zone not accepted (code ${error.code})")
+            refusedTimezone = zone
+            profile
+        } catch (error: Exception) {
+            android.util.Log.w("AccountViewModel", "Unable to synchronize time zone (${error.javaClass.simpleName})")
+            profile
+        }
+    }
+
     private suspend fun load() = snapshotMutex.withLock {
         coroutineScope {
             val id = repository.userId()
@@ -209,6 +276,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val statusesRequest = async { readSection("statuses", repository::accessibleStatuses) }
             val visibilityRequest = async { readSection("incoming visibility", repository::incomingConnectionVisibility) }
             val preferencesRequest = async { readSection("connection preferences", repository::connectionPreferences) }
+            // Not part of a complete sync: a server without the pauses table still syncs everything else.
+            val pausesRequest = async { readSection("schedule pauses", repository::pauses) }
+            val freeAlertsRequest = async { readSection("free alerts", repository::freeAlerts) }
+            val plansRequest = async { readSection("plans", repository::plans) }
+            val groupsRequest = async { readSection("groups", repository::groups) }
+            val groupMembersRequest = async { readSection("group members", repository::groupMembers) }
             val remoteProfile = profileRequest.await()
             val remoteConnections = connectionsRequest.await()
             val remoteProfiles = profilesRequest.await()
@@ -218,14 +291,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remoteStatuses = statusesRequest.await()
             val remotePreferences = preferencesRequest.await()
             val remoteVisibility = visibilityRequest.await()
+            val remotePauses = pausesRequest.await()
+            val remoteFreeAlerts = freeAlertsRequest.await()
+            val remotePlans = plansRequest.await()
+            val remoteGroups = groupsRequest.await()
+            val remoteGroupMembers = groupMembersRequest.await()
             if (repository.auth.currentUserOrNull()?.id != id) return@coroutineScope
 
             val old = _state.value
             val previous = if (old.profile?.id == id) old else null
-            val profile = remoteProfile ?: previous?.profile ?: run {
+            val loadedProfile = remoteProfile ?: previous?.profile ?: run {
                 _state.update { it.copy(syncIssue = true) }
                 return@coroutineScope
             }
+            val profile = if (remoteProfile != null) followPhoneTimezone(remoteProfile) else loadedProfile
             val connections = remoteConnections ?: previous?.connections.orEmpty()
             val peopleIds = connections.map { it.otherPerson(id) }.toSet()
             val profiles = (remoteProfiles ?: previous?.profiles.orEmpty()).filter { it.id in peopleIds } + profile
@@ -239,11 +318,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val previousSchedules = if (previous == null) emptyList() else allSchedules
             val previousStatuses = if (previous == null) emptyList() else allStatuses
             // An older response must not undo a confirmed save or resurrect a deleted row.
-            val ownSchedules = if (remoteSchedules != null && scheduleSync.canApplySnapshot(scheduleRevision)) {
+            val pauses = (remotePauses ?: previous?.pauses.orEmpty()).filter { it.userId in visibleIds }
+            val ownSchedules = (if (remoteSchedules != null && scheduleSync.canApplySnapshot(scheduleRevision)) {
                 remoteSchedules.filter { it.userId == id }
-            } else previous?.schedules.orEmpty()
+            } else previous?.schedules.orEmpty()).withPauses(pauses)
             val schedules = (remoteSchedules ?: previousSchedules)
-                .filter { it.userId != id && it.userId in visibleIds } + ownSchedules
+                .filter { it.userId != id && it.userId in visibleIds }.withPauses(pauses) + ownSchedules
             val statuses = (remoteStatuses ?: previousStatuses).filter { it.userId in visibleIds }
             if (baselineOwner != id) {
                 baselineOwner = id
@@ -257,7 +337,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(signedIn = true, profile = profile,
                 schedules = ownSchedules, statuses = statuses.filter { it.userId == id },
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
-                preferences = preferences, selectedPerson = selected, personSchedules = schedules.filter { it.userId == selected?.id },
+                preferences = preferences, pauses = pauses, selectedPerson = selected,
+                freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds },
+                plans = (remotePlans ?: previous?.plans.orEmpty()).filter { it.senderId in peopleIds || it.recipientId in peopleIds },
+                groups = remoteGroups ?: previous?.groups.orEmpty(),
+                groupMembers = (remoteGroupMembers ?: previous?.groupMembers.orEmpty()).filter { it.memberId in peopleIds },
+                othersSchedules = schedules.filter { it.userId != id }, othersStatuses = statuses.filter { it.userId != id }, personSchedules = schedules.filter { it.userId == selected?.id },
                 personStatuses = statuses.filter { it.userId == selected?.id }, lastSync = syncedAt, syncIssue = !complete,
                 incomingVisibility = remoteVisibility.orEmpty().filter { it.personId in peopleIds }.associateBy { it.personId },
                 peopleSchedulesFresh = remoteSchedules != null, peopleStatusesFresh = remoteStatuses != null) }
@@ -266,7 +351,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 val newSignals = messageNotifications.update(id, signals, current.settings.messages)
                 current.controls.notifiable(newSignals).forEach { signal ->
                     val sender = profiles.find { it.id == signal.senderId }?.let(current.controls::nameOf) ?: "Tu gente"
-                    NotificationHelper.showMessageNotification(getApplication(), signal.id, sender, signal.message)
+                    NotificationHelper.showMessageNotification(getApplication(), signal.id, sender, signal.message,
+                        NotificationHelper.Reply(id, signal.senderId, messages.map { it.message }.filter { it.trim().length in 1..240 }.distinct().take(5)))
                 }
             }
             if (complete || previous != null) saveCurrentCache()
@@ -290,7 +376,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val profile = current.profile ?: return
         saveCache(AccountSnapshot(profile.id, profile, current.profiles, allSchedules, allStatuses,
             current.connections, current.messages, current.signals, current.lastSync?.toString().orEmpty(),
-            current.preferences))
+            current.preferences, current.pauses))
     }
 
     private suspend fun saveCache(snapshot: AccountSnapshot) {
@@ -316,9 +402,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(signedIn = true, initializing = false, profile = cached.profile,
             schedules = cached.schedules.filter { row -> row.userId == id }, statuses = cached.statuses.filter { row -> row.userId == id },
             connections = cached.connections, profiles = cached.profiles, messages = cached.messages, signals = signals,
-            preferences = cached.preferences,
+            preferences = cached.preferences, pauses = cached.pauses,
             selectedPerson = selected, personSchedules = cached.schedules.filter { row -> row.userId == selected?.id },
             personStatuses = cached.statuses.filter { row -> row.userId == selected?.id },
+            othersSchedules = cached.schedules.filter { row -> row.userId != id }, othersStatuses = cached.statuses.filter { row -> row.userId != id },
             lastSync = runCatching { Instant.parse(cached.syncedAt) }.getOrNull()) }
     }
 
@@ -418,12 +505,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun register(name: String, email: String, username: String, password: String, confirmation: String) = perform {
         com.example.findme.domain.model.Registration.error(name, email, username, password, confirmation)?.let { throw IllegalArgumentException(it) }
         com.example.findme.data.repository.AuthorizedSignup.register(name, email, username, password)
-        _state.update { it.copy(confirmationEmail = email.trim()) }
+        _state.update { it.copy(confirmationEmail = email.trim(), confirmationSentAt = android.os.SystemClock.elapsedRealtime()) }
     }
     override fun resendConfirmation(email: String) = perform {
         require(com.example.findme.domain.model.Registration.isEmail(email)) { "Introduce un correo válido." }
         com.example.findme.data.repository.AuthorizedSignup.resend(email)
-        _state.update { it.copy(confirmationEmail = email.trim(), notice = "Solicitud enviada. Revisa tu correo y la carpeta de spam.") }
+        _state.update { it.copy(confirmationEmail = email.trim(), confirmationSentAt = android.os.SystemClock.elapsedRealtime(),
+            notice = "Solicitud enviada. Revisa tu correo y la carpeta de spam.") }
     }
     override fun finishRegistration() {
         _state.update { it.copy(confirmationEmail = null, error = null, notice = null, loginRevision = it.loginRevision + 1) }
@@ -438,8 +526,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     override fun logout() = perform {
         // While the session still exists, so the server accepts removing this device.
         com.example.findme.push.PushTokens.unregister()
+        forgetAutoPlaces()
         repository.auth.signOut()
-        _state.value = AccountState(initializing = false)
+        PendingPasswordRecovery.clear(getApplication())
+        _state.value = AccountState(initializing = false,
+            recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
         com.example.findme.widget.WidgetStore.clear(getApplication())
     }
     override fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {
@@ -447,7 +538,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             require(activities.isNotEmpty()) { "Elige al menos un día." }
             val currentSchedules = _state.value.schedules
             activities.forEach { activity ->
-                val error = validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
+                val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+                val error = activity.oneOffDate?.let { date ->
+                    runCatching { java.time.LocalDate.parse(date) }.getOrNull()
+                        ?.let { com.example.findme.domain.model.validateOneOffDate(it, java.time.LocalDate.now(zone)) }
+                        ?: if (java.time.LocalDate.parse(date).dayOfWeek.value != activity.dayOfWeek) "Elige una fecha válida." else null
+                } ?: validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
                     ?: findScheduleConflict(currentSchedules, activity)?.conflictMessage()
                 if (error != null) throw IllegalArgumentException(error)
             }
@@ -455,7 +551,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val ownerId = repository.userId()
             scheduleSync.beginWrite()
             try {
-                val rows = repository.saveSchedules(activities.map { it.copy(userId = ownerId) })
+                val rows = repository.saveSchedules(activities.map { it.copy(userId = ownerId) }).withPauses(_state.value.pauses)
                 if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
 
                 val ids = rows.map { it.id }.toSet()
@@ -470,11 +566,46 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             publishWidgetSnapshot()
         }
     }
+    /**
+     * Saves the activities chosen from a calendar file. Those that clash with the schedule (or with each
+     * other) or are invalid are left out and counted, so one bad event does not block the rest.
+     */
+    override fun importSchedules(draftId: String, activities: List<ScheduleDto>) = perform {
+        require(activities.isNotEmpty()) { "Elige al menos una actividad." }
+        val ownerId = repository.userId()
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        val today = java.time.LocalDate.now(zone)
+        // Importing the same file again updates the same rows instead of clashing with them.
+        val current = _state.value.schedules.filterNot { row -> activities.any { it.id == row.id } }
+        val accepted = mutableListOf<ScheduleDto>()
+        var left = 0
+        activities.forEach { activity ->
+            val invalid = validateSchedule(activity.dayOfWeek, activity.startTime, activity.endTime, activity.title, activity.endsNextDay)
+                ?: activity.oneOffDate?.let { com.example.findme.domain.model.validateOneOffDate(java.time.LocalDate.parse(it), today) }
+            if (invalid != null || findScheduleConflict(current + accepted, activity) != null) left++
+            else accepted += activity.copy(userId = ownerId)
+        }
+        if (accepted.isEmpty()) throw IllegalArgumentException("Ninguna actividad se pudo importar: todas coinciden con tu horario o no son válidas.")
+        scheduleSync.beginWrite()
+        try {
+            // Weekly and one-off rows go in separate requests, so every row of a request has the same fields.
+            val (once, weekly) = accepted.partition { it.isOneOff }
+            val rows = ((if (weekly.isNotEmpty()) repository.saveSchedules(weekly) else emptyList()) +
+                (if (once.isNotEmpty()) repository.saveSchedules(once) else emptyList())).withPauses(_state.value.pauses)
+            if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
+            val ids = rows.map { it.id }.toSet()
+            allSchedules = allSchedules.filterNot { it.id in ids } + rows
+            _state.update { old -> old.copy(schedules = old.schedules.filterNot { it.id in ids } + rows, savedScheduleDraftId = draftId,
+                notice = "Importadas ${rows.size} actividades" + if (left > 0) ". $left no se importaron porque coinciden con tu horario." else ".") }
+        } finally { scheduleSync.finishWrite() }
+        snapshotMutex.withLock { saveCurrentCache() }
+        publishWidgetSnapshot()
+    }
     override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) = perform {
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {
-            val updated = repository.changeScheduleOccurrence(id, originalDate, change)
+            val updated = listOf(repository.changeScheduleOccurrence(id, originalDate, change)).withPauses(_state.value.pauses).single()
             if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
             allSchedules = allSchedules.map { if (it.id == id) updated else it }
             _state.update { old -> old.copy(
@@ -489,6 +620,122 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         } finally {
             scheduleSync.finishWrite()
         }
+        snapshotMutex.withLock { saveCurrentCache() }
+        publishWidgetSnapshot()
+    }
+
+    override fun addPause(draftId: String, title: String, start: String, end: String) = perform {
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        com.example.findme.domain.model.validatePause(title,
+            runCatching { java.time.LocalDate.parse(start) }.getOrNull(), runCatching { java.time.LocalDate.parse(end) }.getOrNull(),
+            java.time.LocalDate.now(zone))?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val pause = repository.addPause(title, start, end)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        replacePauses(_state.value.pauses.filterNot { it.id == pause.id } + pause)
+        _state.update { it.copy(savedScheduleDraftId = draftId, notice = "Tu horario queda en pausa: ${pause.title}.") }
+    }
+    override fun deletePause(id: String) = perform {
+        val owner = repository.userId()
+        repository.deletePause(id)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        replacePauses(_state.value.pauses.filterNot { it.id == id })
+        _state.update { it.copy(notice = "Pausa eliminada. Tu horario vuelve a aplicarse esas fechas.") }
+    }
+    override fun notifyWhenFree(personId: String) = perform {
+        repository.addFreeAlert(personId)
+        val name = _state.value.profiles.find { it.id == personId }?.let(_state.value.controls::nameOf) ?: "esa persona"
+        _state.update { old -> old.copy(freeAlerts = old.freeAlerts.filterNot { it.targetId == personId } +
+            FreeAlert(repository.userId(), personId, Instant.now().plusSeconds(86400).toString()),
+            notice = "Te avisaremos cuando $name quede libre, durante las próximas 24 horas.") }
+    }
+    override fun cancelFreeAlert(personId: String) = perform {
+        repository.removeFreeAlert(personId)
+        _state.update { old -> old.copy(freeAlerts = old.freeAlerts.filterNot { it.targetId == personId }, notice = "Aviso cancelado.") }
+    }
+
+    override fun proposePlan(draftId: String, personId: String, title: String, location: String, start: Instant, end: Instant) = perform {
+        com.example.findme.domain.model.Plans.validate(title, start, end, Instant.now())?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val plan = repository.proposePlan(personId, title, location, start, end)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        val name = _state.value.profiles.find { it.id == personId }?.let(_state.value.controls::nameOf) ?: "esa persona"
+        _state.update { old -> old.copy(plans = old.plans + plan, savedScheduleDraftId = draftId,
+            notice = "Propuesta enviada a $name. Te avisaremos cuando responda.") }
+    }
+    override fun answerPlan(id: String, accept: Boolean) = perform {
+        val plan = repository.answerPlan(id, accept)
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }) }
+        // Accepting added the activity to the schedule; load it.
+        refreshAfterSave(if (accept) "Plan aceptado. Ya está en tu horario." else "Respuesta enviada.")
+    }
+    override fun cancelPlan(id: String) = perform {
+        val plan = repository.cancelPlan(id)
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
+    }
+
+    override fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) = perform {
+        require(members.isNotEmpty()) { "Elige al menos una persona para el grupo." }
+        val owner = repository.userId()
+        val current = id?.let { _state.value.membersOf(it).toSet() }.orEmpty()
+        val group = repository.saveGroup(id, name, members, current)
+        if (repository.auth.currentUserOrNull()?.id != owner) return@perform
+        _state.update { old -> old.copy(groups = old.groups.filterNot { it.id == group.id } + group,
+            groupMembers = old.groupMembers.filterNot { it.groupId == group.id } + members.map { PersonGroupMember(group.id, it) },
+            savedScheduleDraftId = draftId, notice = "Grupo «${group.name}» guardado.") }
+    }
+    override fun deleteGroup(id: String) = perform {
+        repository.deleteGroup(id)
+        _state.update { old -> old.copy(groups = old.groups.filterNot { it.id == id },
+            groupMembers = old.groupMembers.filterNot { it.groupId == id }, notice = "Grupo eliminado.") }
+    }
+    override fun sendToGroup(groupId: String, message: QuickMessage) = perform {
+        val state = _state.value
+        val group = state.groups.find { it.id == groupId } ?: return@perform
+        val recipients = state.membersOf(groupId).filter { member -> state.connections.any { it.otherPerson(state.profile?.id.orEmpty()) == member } }
+        require(recipients.isNotEmpty()) { "Este grupo ya no tiene personas conectadas." }
+        repository.sendSignals(recipients, message.message)
+        _state.update { it.copy(notice = "Mensaje enviado a ${recipients.size} personas de «${group.name}». Se conserva durante 24 horas.") }
+    }
+
+    private suspend fun loadAutoPlaces(owner: String) {
+        val places = runCatching { com.example.findme.places.AutoPlaces.places(getApplication(), owner) }.getOrDefault(emptyList())
+        if (repository.auth.currentUserOrNull()?.id == owner) _state.update { it.copy(autoPlaces = places) }
+        runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+    }
+    /** Saved places are home addresses and the like: they do not outlive the session on this phone. */
+    private suspend fun forgetAutoPlaces(owner: String? = repository.auth.currentUserOrNull()?.id) {
+        owner ?: return
+        runCatching {
+            com.example.findme.places.AutoPlaces.places(getApplication(), owner).forEach {
+                com.example.findme.places.AutoPlaces.remove(getApplication(), owner, it.id)
+            }
+            com.example.findme.places.AutoPlaces.register(getApplication(), null)
+        }
+    }
+    override fun addAutoPlace(label: String) = perform {
+        com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
+        val owner = repository.userId()
+        val location = com.example.findme.places.AutoPlaces.currentLocation(getApplication())
+            ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, location)
+        _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+    }
+    override fun removeAutoPlace(id: String) = perform {
+        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
+        _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
+    }
+    /** After the location permission changes, so the geofences match what Android now allows. */
+    override fun refreshAutoPlaces() {
+        val owner = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { loadAutoPlaces(owner) }
+    }
+
+    /** Applies the new pauses to every loaded schedule, then saves the cache and refreshes the widget and reminders. */
+    private suspend fun replacePauses(pauses: List<SchedulePause>) {
+        allSchedules = allSchedules.withPauses(pauses)
+        _state.update { old -> old.copy(pauses = pauses, schedules = old.schedules.withPauses(pauses),
+            personSchedules = old.personSchedules.withPauses(pauses), othersSchedules = old.othersSchedules.withPauses(pauses)) }
         snapshotMutex.withLock { saveCurrentCache() }
         publishWidgetSnapshot()
     }
@@ -510,10 +757,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
     override fun setStatus(text: String, minutes: Long) = perform {
         repository.setStatus(text, minutes)
+        // A status chosen by hand is not removed when leaving a saved place.
+        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Estado actualizado.")
     }
     override fun clearStatus() = perform {
         repository.clearStatus()
+        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Se muestra tu horario de nuevo.")
     }
     override fun invite() = perform {
@@ -538,6 +788,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 old.copy(connections = old.connections.filterNot { it.id == id },
                     incomingVisibility = old.incomingVisibility - removed,
                     profiles = old.profiles.filterNot { it.id == removed },
+                    othersSchedules = old.othersSchedules.filterNot { it.userId == removed },
+                    othersStatuses = old.othersStatuses.filterNot { it.userId == removed },
+                    groupMembers = old.groupMembers.filterNot { it.memberId == removed },
                     preferences = old.preferences.filterNot { it.connectionId == id },
                     selectedPerson = if (wasSelected) null else old.selectedPerson,
                     personSchedules = if (wasSelected) emptyList() else old.personSchedules,
@@ -555,7 +808,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun selectPerson(profile: AccountProfile) = perform {
-        val schedules = repository.schedules(profile.id)
+        val schedules = repository.schedules(profile.id).withPauses(_state.value.pauses)
         val statuses = repository.overrides(profile.id)
         _state.update { it.copy(selectedPerson = profile, personSchedules = schedules, personStatuses = statuses) }
     }
@@ -590,7 +843,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(notice = "Contraseña actualizada.") }
     }
     override fun deleteAccount(password: String) = perform {
+        val owner = repository.userId()
         repository.deleteAccount(password)
+        forgetAutoPlaces(owner)
         _state.value = AccountState(initializing = false, notice = "Tu cuenta y tus datos se eliminaron.")
         com.example.findme.widget.WidgetStore.clear(getApplication())
     }
@@ -598,7 +853,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val state = _state.value
         val profile = state.profile ?: return null
         return com.example.findme.domain.model.AccountExport.build(profile, state.schedules, state.statuses, state.messages,
-            state.connections, state.profiles, state.signals, Instant.now().toString())
+            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses, state.groups, state.groupMembers)
     }
     override fun exportFinished(saved: Boolean) {
         _state.update { it.copy(notice = if (saved) "Copia de tus datos guardada." else null,

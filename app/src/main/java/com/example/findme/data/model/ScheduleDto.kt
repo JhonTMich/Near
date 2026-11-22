@@ -17,5 +17,11 @@ data class ScheduleDto(
     val modality: String = "presencial",
     @SerialName("ends_next_day") val endsNextDay: Boolean = false,
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    @SerialName("occurrence_exceptions") val occurrenceExceptions: Map<String, ScheduleException> = emptyMap()
-)
+    @SerialName("occurrence_exceptions") val occurrenceExceptions: Map<String, ScheduleException> = emptyMap(),
+    /** "yyyy-MM-dd" for an activity that happens only on that date; null for a weekly one. Omitted when null,
+     *  so weekly saves keep working on a server without the column. */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    @SerialName("one_off_date") val oneOffDate: String? = null
+) {
+    val isOneOff: Boolean get() = oneOffDate != null
+}

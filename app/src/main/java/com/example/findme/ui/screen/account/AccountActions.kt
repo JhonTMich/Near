@@ -28,6 +28,23 @@ interface AccountActions {
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}
     fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) {}
     fun deleteSchedule(id: String) {}
+    fun importSchedules(draftId: String, activities: List<ScheduleDto>) {}
+    /** [start] and [end] are inclusive "yyyy-MM-dd" dates in the owner's zone. */
+    fun addPause(draftId: String, title: String, start: String, end: String) {}
+    fun deletePause(id: String) {}
+    fun notifyWhenFree(personId: String) {}
+    fun cancelFreeAlert(personId: String) {}
+    fun proposePlan(draftId: String, personId: String, title: String, location: String, start: java.time.Instant, end: java.time.Instant) {}
+    fun answerPlan(id: String, accept: Boolean) {}
+    fun cancelPlan(id: String) {}
+    /** Saves the phone's current location as a place that shares [label] on arrival. */
+    fun addAutoPlace(label: String) {}
+    fun removeAutoPlace(id: String) {}
+    fun refreshAutoPlaces() {}
+    /** Creates the group when [id] is null, or renames it; its members become exactly [members]. */
+    fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) {}
+    fun deleteGroup(id: String) {}
+    fun sendToGroup(groupId: String, message: QuickMessage) {}
     fun setStatus(text: String, minutes: Long) {}
     fun clearStatus() {}
     fun invite() {}

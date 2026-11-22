@@ -48,8 +48,9 @@ class NearMessagingService : FirebaseMessagingService() {
         }
 
         suspend fun show(context: Context, data: Map<String, String>) {
-            if (accountScreenVisible) return
             val alert = PushAlerts.from(data) ?: return
+            // With Near open the app announces changes itself; a requested alert has no local equivalent.
+            if (accountScreenVisible && !alert.requested) return
             val auth = SupabaseClientProvider.client.auth
             auth.awaitInitialization()
             val owner = auth.currentUserOrNull()?.id ?: return
@@ -59,7 +60,10 @@ class NearMessagingService : FirebaseMessagingService() {
             if (people.none { it.id == alert.person }) return
             val settings = AccountSettingsRepository(context).settings(owner).first()
             if (auth.currentUserOrNull()?.id != owner || !PushAlerts.allowed(alert, settings)) return
-            NotificationHelper.show(context, alert.channel, alert.id, alert.title, alert.text)
+            // A received message can be answered from the notification.
+            val reply = if (data["type"] == "message") NotificationHelper.Reply(owner, alert.person,
+                MessageReplies.suggestions(context, owner)) else null
+            NotificationHelper.show(context, alert.channel, alert.id, alert.title, alert.text, reply)
         }
     }
 }

@@ -72,6 +72,13 @@ class AccountRepository {
             select()
         }.decodeSingle<AccountProfile>()
     }
+    /** Schedules, reminders and the server's activity pushes all read the profile's zone; it follows the phone's. */
+    suspend fun updateTimezone(zone: String): AccountProfile =
+        client.postgrest["account_profiles"].update(buildJsonObject { put("timezone", zone) }) {
+            filter { eq("id", userId()) }
+            select()
+        }.decodeSingle<AccountProfile>()
+
     suspend fun incomingConnectionVisibility() =
         client.postgrest.rpc("incoming_connection_visibility").decodeList<ConnectionVisibility>()
 
@@ -110,6 +117,94 @@ class AccountRepository {
                 put("new_overnight", change.endsNextDay)
             }
         }).decodeSingle<ScheduleDto>()
+
+    /** Own pauses and those of people who share their schedule; RLS decides. */
+    suspend fun pauses() = client.postgrest["schedule_pauses"].select().decodeList<SchedulePause>()
+
+    suspend fun addPause(title: String, start: String, end: String): SchedulePause =
+        client.postgrest["schedule_pauses"].insert(buildJsonObject {
+            put("id", UUID.randomUUID().toString())
+            put("user_id", userId())
+            put("title", title.trim())
+            put("start_date", start)
+            put("end_date", end)
+        }) { select() }.decodeSingle<SchedulePause>()
+
+    suspend fun deletePause(id: String) {
+        client.postgrest["schedule_pauses"].delete { filter { eq("id", id); eq("user_id", userId()) } }
+    }
+
+    suspend fun freeAlerts() = client.postgrest["free_alerts"].select().decodeList<FreeAlert>()
+
+    suspend fun addFreeAlert(targetId: String) {
+        client.postgrest["free_alerts"].upsert(buildJsonObject {
+            put("watcher_id", userId())
+            put("target_id", targetId)
+        }) { onConflict = "watcher_id,target_id"; ignoreDuplicates = true }
+    }
+
+    suspend fun removeFreeAlert(targetId: String) {
+        client.postgrest["free_alerts"].delete { filter { eq("watcher_id", userId()); eq("target_id", targetId) } }
+    }
+
+    /** Plans this account sent or received; RLS returns only those. */
+    suspend fun plans() = client.postgrest["plan_proposals"].select().decodeList<PlanProposal>()
+
+    suspend fun proposePlan(recipientId: String, title: String, location: String, start: Instant, end: Instant): PlanProposal =
+        client.postgrest["plan_proposals"].insert(buildJsonObject {
+            put("id", UUID.randomUUID().toString())
+            put("sender_id", userId())
+            put("recipient_id", recipientId)
+            put("title", title.trim())
+            put("location", location.trim())
+            put("starts_at", start.toString())
+            put("ends_at", end.toString())
+        }) { select() }.decodeSingle<PlanProposal>()
+
+    suspend fun answerPlan(id: String, accept: Boolean): PlanProposal =
+        client.postgrest.rpc("answer_plan", buildJsonObject { put("plan_id", id); put("accept", accept) }).decodeSingle<PlanProposal>()
+
+    suspend fun cancelPlan(id: String): PlanProposal =
+        client.postgrest.rpc("cancel_plan", buildJsonObject { put("plan_id", id) }).decodeSingle<PlanProposal>()
+
+    suspend fun groups() = client.postgrest["person_groups"].select().decodeList<PersonGroup>()
+    suspend fun groupMembers() = client.postgrest["person_group_members"].select().decodeList<PersonGroupMember>()
+
+    /** Creates the group or renames it, then makes its members exactly [members]. */
+    suspend fun saveGroup(id: String?, name: String, members: Set<String>, current: Set<String>): PersonGroup {
+        val clean = name.trim()
+        require(clean.length in 1..40) { "El nombre del grupo debe tener entre 1 y 40 caracteres." }
+        require(members.size <= 20) { "Un grupo puede tener hasta 20 personas." }
+        val group = if (id == null) client.postgrest["person_groups"].insert(buildJsonObject {
+            put("id", UUID.randomUUID().toString()); put("owner_id", userId()); put("name", clean)
+        }) { select() }.decodeSingle<PersonGroup>()
+        else client.postgrest["person_groups"].update(buildJsonObject { put("name", clean) }) {
+            filter { eq("id", id); eq("owner_id", userId()) }
+            select()
+        }.decodeSingle<PersonGroup>()
+        val removed = current - members
+        if (removed.isNotEmpty()) client.postgrest["person_group_members"].delete {
+            filter { eq("group_id", group.id); isIn("member_id", removed.toList()) }
+        }
+        val added = members - current
+        if (added.isNotEmpty()) client.postgrest["person_group_members"].insert(added.map { PersonGroupMember(group.id, it) })
+        return group
+    }
+
+    suspend fun deleteGroup(id: String) {
+        client.postgrest["person_groups"].delete { filter { eq("id", id); eq("owner_id", userId()) } }
+    }
+
+    /** One request, so the hourly limit either accepts the whole group message or none of it. */
+    suspend fun sendSignals(recipientIds: List<String>, message: String) {
+        val sender = userId()
+        client.postgrest["connection_signals"].insert(recipientIds.map { recipient ->
+            buildJsonObject {
+                put("id", UUID.randomUUID().toString()); put("sender_id", sender)
+                put("recipient_id", recipient); put("message", message)
+            }
+        })
+    }
 
     suspend fun deleteSchedule(id: String) {
         client.postgrest["personal_schedule"].delete { filter { eq("id", id); eq("user_id", userId()) } }
@@ -195,7 +290,14 @@ class AccountRepository {
 
     /** Auth answers the same way for unknown addresses, so this does not reveal who has an account. */
     suspend fun requestPasswordReset(email: String) {
-        auth.resetPasswordForEmail(email.trim().lowercase(java.util.Locale.ROOT), redirectUrl = com.example.findme.domain.model.RecoveryLink.REDIRECT)
+        try {
+            auth.resetPasswordForEmail(email.trim().lowercase(java.util.Locale.ROOT), redirectUrl = com.example.findme.domain.model.RecoveryLink.REDIRECT)
+        } catch (error: io.github.jan.supabase.auth.exception.AuthRestException) {
+            val limited = error.errorCode == io.github.jan.supabase.auth.exception.AuthErrorCode.OverEmailSendRateLimit ||
+                error.errorCode == io.github.jan.supabase.auth.exception.AuthErrorCode.OverRequestRateLimit
+            if (!limited) throw error
+            throw IllegalArgumentException("Ya enviamos varios enlaces hace poco. Espera unos minutos, revisa la carpeta de spam e inténtalo de nuevo.")
+        }
     }
 
     suspend fun exchangeRecoveryCode(code: String) {

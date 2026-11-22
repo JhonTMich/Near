@@ -117,7 +117,13 @@ class RemindersRescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            try { ActivityReminders.reschedule(context.applicationContext) } finally { pending.finish() }
+            try {
+                ActivityReminders.reschedule(context.applicationContext)
+                // Geofences are also forgotten on reboot and on app updates.
+                if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                    runCatching { com.example.findme.places.AutoPlaces.restore(context.applicationContext) }
+                }
+            } finally { pending.finish() }
         }
     }
 }
