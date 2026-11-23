@@ -2062,7 +2062,8 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
                 Icon(Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
                     Text(place.label, fontWeight = FontWeight.SemiBold)
-                    Text(listOfNotNull(place.address, "${place.radius.toInt()} m").joinToString(" · "),
+                    Text(listOfNotNull(place.activityCategory?.let { com.example.findme.data.model.ActivityCategory.fromKey(it).label },
+                        place.address, "${place.radius.toInt()} m").joinToString(" · "),
                         color = TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { actions.removeAutoPlace(place.id) }, enabled = !state.busy) {
@@ -2105,6 +2106,10 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
     val count = state.autoPlaces.size
     LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
     var byAddress by rememberSaveable { mutableStateOf(false) }
+    // Follows the chosen label («En el trabajo» → Trabajo) until the person picks one themselves.
+    var categoryTouched by rememberSaveable { mutableStateOf(false) }
+    var category by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.suggestedCategory(label)) }
+    LaunchedEffect(label) { if (!categoryTouched) category = com.example.findme.places.AutoPlaces.suggestedCategory(label) }
     var radius by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.RADIUS) }
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<com.example.findme.places.AutoPlaces.Found>>(emptyList()) }
@@ -2143,7 +2148,13 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
         Choices(com.example.findme.places.AutoPlaces.RADIUS_CHOICES, radius, { radius = it }) { "${it.toInt()} m" }
         (com.example.findme.places.AutoPlaces.validateLabel(label) ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
         val ready = com.example.findme.places.AutoPlaces.validateLabel(label) == null && (!byAddress || chosen != null)
-        Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null) },
+        Text("Actividades en este lugar", style = MaterialTheme.typography.titleSmall)
+        Choices(listOf<String?>(null) + com.example.findme.places.AutoPlaces.CATEGORIES, category, { category = it; categoryTouched = true }) { key ->
+            key?.let { com.example.findme.data.model.ActivityCategory.fromKey(it).label } ?: "Ninguna"
+        }
+        Text("Tus actividades presenciales de esa categoría cuentan como asistidas cuando estás aquí.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null, category) },
             enabled = !state.busy && ready, modifier = Modifier.fillMaxWidth()) {
             Text(if (state.busy) (if (byAddress) "Guardando…" else "Buscando tu ubicación…") else "Guardar lugar")
         }

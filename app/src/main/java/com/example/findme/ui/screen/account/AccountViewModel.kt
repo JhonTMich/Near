@@ -772,13 +772,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.places.AutoPlaces.register(getApplication(), null)
         }
     }
-    override fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?) = perform {
+    override fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?, category: String?) = perform {
         com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
         val owner = repository.userId()
         val (latitude, longitude) = at?.let { it.latitude to it.longitude }
             ?: com.example.findme.places.AutoPlaces.currentLocation(getApplication())?.let { it.latitude to it.longitude }
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
-        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address)
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address, category)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
     }
     override suspend fun searchAddress(query: String) =

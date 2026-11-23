@@ -47,9 +47,13 @@ interface AccountActions {
     fun answerPlan(id: String, accept: Boolean) {}
     fun cancelPlan(id: String) {}
     /** Saves the phone's current location as a place that shares [label] on arrival. */
-    fun addAutoPlace(label: String) = addAutoPlace(label, com.example.findme.places.AutoPlaces.RADIUS, null)
-    /** Saves [at] (an address found with [searchAddress]), or the current location when null, as a zone of [radius] metres. */
-    fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?) {}
+    fun addAutoPlace(label: String) = addAutoPlace(label, com.example.findme.places.AutoPlaces.RADIUS, null,
+        com.example.findme.places.AutoPlaces.suggestedCategory(label))
+    /**
+     * Saves [at] (an address found with [searchAddress]), or the current location when null, as a zone of
+     * [radius] metres that holds your activities of [category] (null for none).
+     */
+    fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?, category: String?) {}
     suspend fun searchAddress(query: String): List<com.example.findme.places.AutoPlaces.Found> = emptyList()
     /** Shares «En la calle» outside every saved place when there is no activity in progress. */
     fun setStreetStatus(enabled: Boolean) {}

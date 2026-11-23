@@ -48,7 +48,16 @@ import kotlin.coroutines.resume
 @Serializable
 data class AutoPlace(val id: String, val label: String, val latitude: Double, val longitude: Double, val radius: Float = AutoPlaces.RADIUS,
     /** The address it was found by, only to recognise it in the list; null when saved from the current location. */
-    val address: String? = null)
+    val address: String? = null,
+    /** The activities held here: "university", "work" or [AutoPlaces.NO_CATEGORY]; null if never chosen. */
+    val category: String? = null) {
+    /** Places saved before categories existed follow their label, so «En la universidad» holds your classes. */
+    val activityCategory: String? get() = when (category) {
+        null -> AutoPlaces.suggestedCategory(label)
+        in AutoPlaces.CATEGORIES -> category
+        else -> null
+    }
+}
 
 /**
  * Automatic status by place: arriving at a saved place shares its label («En casa»), leaving it removes
@@ -62,6 +71,21 @@ object AutoPlaces {
     /** How long an automatic status lasts if the phone never reports leaving: the maximum for a status. */
     const val STATUS_MINUTES = 1440L
     val LABELS = listOf("En casa", "En la universidad", "En el trabajo", "En el gimnasio")
+    /** Categories of activity a place can hold; free time has no fixed place. */
+    val CATEGORIES = listOf("university", "work")
+    const val NO_CATEGORY = "none"
+
+    /** The category a label suggests, so «En la universidad» holds your classes without asking. */
+    fun suggestedCategory(label: String): String? = when (label.trim().lowercase()) {
+        "en la universidad" -> "university"
+        "en el trabajo" -> "work"
+        else -> null
+    }
+
+    /** The places where [schedule] happens: same category, and only for in-person activities. */
+    fun placesFor(schedule: ScheduleDto, places: List<AutoPlace>): List<AutoPlace> =
+        if (schedule.modality == "virtual" || schedule.category !in CATEGORIES) emptyList()
+        else places.filter { it.activityCategory == schedule.category }
     private val json = Json { ignoreUnknownKeys = true }
     private fun placesKey(owner: String) = stringPreferencesKey("auto_places_$owner")
     /** Which place set the current automatic status, so leaving another place or a manual status is left alone. */
@@ -87,13 +111,13 @@ object AutoPlaces {
     fun encode(places: List<AutoPlace>): String = json.encodeToString(ListSerializer(AutoPlace.serializer()), places)
 
     suspend fun add(context: Context, owner: String, label: String, latitude: Double, longitude: Double,
-        radius: Float = RADIUS, address: String? = null): List<AutoPlace> {
+        radius: Float = RADIUS, address: String? = null, category: String? = suggestedCategory(label)): List<AutoPlace> {
         validateLabel(label)?.let { throw IllegalArgumentException(it) }
         require(radius in RADIUS_CHOICES) { "Elige el tamaño de la zona." }
         val current = places(context, owner)
         require(current.size < MAX) { "Puedes guardar hasta $MAX lugares. Quita uno para añadir otro." }
         val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), latitude, longitude, radius,
-            address?.trim()?.takeIf { it.isNotEmpty() })
+            address?.trim()?.takeIf { it.isNotEmpty() }, category?.takeIf { it in CATEGORIES } ?: NO_CATEGORY)
         context.dataStore.edit { it[placesKey(owner)] = encode(updated) }
         register(context, owner)
         return updated
