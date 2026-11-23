@@ -46,7 +46,9 @@ import kotlin.coroutines.resume
 
 /** A place saved on this phone. Its coordinates never leave the device; only [label] is shared as a status. */
 @Serializable
-data class AutoPlace(val id: String, val label: String, val latitude: Double, val longitude: Double, val radius: Float = AutoPlaces.RADIUS)
+data class AutoPlace(val id: String, val label: String, val latitude: Double, val longitude: Double, val radius: Float = AutoPlaces.RADIUS,
+    /** The address it was found by, only to recognise it in the list; null when saved from the current location. */
+    val address: String? = null)
 
 /**
  * Automatic status by place: arriving at a saved place shares its label («En casa»), leaving it removes
@@ -55,6 +57,8 @@ data class AutoPlace(val id: String, val label: String, val latitude: Double, va
 object AutoPlaces {
     const val MAX = 5
     const val RADIUS = 150f
+    /** Zone sizes in metres: a house or an office, up to a whole campus. Android recommends at least 100 m. */
+    val RADIUS_CHOICES = listOf(100f, 150f, 300f, 500f)
     /** How long an automatic status lasts if the phone never reports leaving: the maximum for a status. */
     const val STATUS_MINUTES = 1440L
     val LABELS = listOf("En casa", "En la universidad", "En el trabajo", "En el gimnasio")
@@ -82,14 +86,47 @@ object AutoPlaces {
 
     fun encode(places: List<AutoPlace>): String = json.encodeToString(ListSerializer(AutoPlace.serializer()), places)
 
-    suspend fun add(context: Context, owner: String, label: String, location: Location): List<AutoPlace> {
+    suspend fun add(context: Context, owner: String, label: String, latitude: Double, longitude: Double,
+        radius: Float = RADIUS, address: String? = null): List<AutoPlace> {
         validateLabel(label)?.let { throw IllegalArgumentException(it) }
+        require(radius in RADIUS_CHOICES) { "Elige el tamaño de la zona." }
         val current = places(context, owner)
         require(current.size < MAX) { "Puedes guardar hasta $MAX lugares. Quita uno para añadir otro." }
-        val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), location.latitude, location.longitude)
+        val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), latitude, longitude, radius,
+            address?.trim()?.takeIf { it.isNotEmpty() })
         context.dataStore.edit { it[placesKey(owner)] = encode(updated) }
         register(context, owner)
         return updated
+    }
+
+    /** An address found by the phone's geocoder, ready to be saved as a place. */
+    data class Found(val address: String, val latitude: Double, val longitude: Double)
+
+    /**
+     * Looks up [query] («Av. Universitaria 1801, Lima») with Android's geocoder. Only the text goes to the
+     * geocoding service of the phone; nothing is sent to Near's server. Empty when there is no geocoder.
+     */
+    suspend fun search(context: Context, query: String): List<Found> {
+        val text = query.trim()
+        if (text.length < 3 || !android.location.Geocoder.isPresent()) return emptyList()
+        val geocoder = android.location.Geocoder(context)
+        val addresses: List<android.location.Address> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            withTimeoutOrNull(15_000) {
+                suspendCancellableCoroutine { continuation ->
+                    geocoder.getFromLocationName(text, 5, object : android.location.Geocoder.GeocodeListener {
+                        override fun onGeocode(found: MutableList<android.location.Address>) { continuation.resume(found) }
+                        override fun onError(message: String?) { continuation.resume(emptyList()) }
+                    })
+                }
+            }.orEmpty()
+        } else kotlinx.coroutines.withContext(Dispatchers.IO) {
+            @Suppress("DEPRECATION")
+            runCatching { geocoder.getFromLocationName(text, 5) }.getOrNull().orEmpty()
+        }
+        return addresses.filter { it.hasLatitude() && it.hasLongitude() }.map { address ->
+            val line = (0..address.maxAddressLineIndex).mapNotNull { address.getAddressLine(it) }.joinToString(", ")
+            Found(line.ifBlank { text }, address.latitude, address.longitude)
+        }.distinctBy { it.latitude to it.longitude }
     }
 
     suspend fun remove(context: Context, owner: String, id: String): List<AutoPlace> {

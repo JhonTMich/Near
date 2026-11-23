@@ -758,14 +758,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.places.AutoPlaces.register(getApplication(), null)
         }
     }
-    override fun addAutoPlace(label: String) = perform {
+    override fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?) = perform {
         com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
         val owner = repository.userId()
-        val location = com.example.findme.places.AutoPlaces.currentLocation(getApplication())
+        val (latitude, longitude) = at?.let { it.latitude to it.longitude }
+            ?: com.example.findme.places.AutoPlaces.currentLocation(getApplication())?.let { it.latitude to it.longitude }
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
-        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, location)
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
     }
+    override suspend fun searchAddress(query: String) =
+        runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
     override fun removeAutoPlace(id: String) = perform {
         val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
