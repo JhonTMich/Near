@@ -167,6 +167,17 @@ jobs:
             chmod +x gradlew
             ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain
             adb pull /sdcard/Pictures/NearTests "$RUNNER_TEMP/near-screens"
+      - name: Upload instrumented test failure reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: near-instrumented-test-failures
+          path: |
+            app/build/outputs/androidTest-results/connected/debug
+            app/build/reports/androidTests/connected/debug
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload screenshots for visual review
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
