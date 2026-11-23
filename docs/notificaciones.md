@@ -20,6 +20,26 @@ actividades antes de que empiecen (alarmas del teléfono). El envío requiere qu
 - El recordatorio está apagado por defecto. Llega a la hora exacta si Android permite alarmas exactas;
   si no, puede retrasarse unos minutos (la app ofrece permitirlas).
 
+### Modo alarma (opcional)
+
+En Perfil → Notificaciones → *Antes de tus actividades* se puede activar **Sonar como alarma**. En vez
+de una notificación, el recordatorio suena como un despertador:
+
+- Se programa con `setAlarmClock`, así que es exacto, no lo retrasa el ahorro de batería y aparece el
+  icono de alarma en la barra de estado.
+- Suena en el canal de alarma de Android (respeta su volumen y el modo No molestar deja pasar las
+  alarmas) con el sonido elegido en el selector de sonidos de alarma del sistema, o con el
+  predeterminado del teléfono. Si el sonido elegido ya no existe, usa el predeterminado.
+- Vibra (se puede desactivar) y muestra una pantalla completa sobre la pantalla bloqueada con
+  *Detener* y *Posponer* (5, 10 o 15 min). Posponer nunca la hace sonar después del inicio de la actividad.
+- Si nadie la detiene, deja de sonar a los dos minutos y queda el recordatorio como notificación normal.
+- *Probar la alarma* la hace sonar al momento con los ajustes actuales.
+
+Requisitos y respaldo: sin el permiso de alarmas exactas Android puede impedir que la alarma arranque
+desde segundo plano; en ese caso llega la notificación de siempre. En Android 14+ la pantalla completa
+necesita el permiso *Notificaciones de pantalla completa* (la app enlaza a ese ajuste); sin él suena
+igual, pero solo se ve la notificación con sus botones.
+
 ## Piezas
 
 - `app`: `push/` (token y servicio de FCM), `reminders/` (alarma del recordatorio), configuración de
@@ -72,3 +92,7 @@ Con dos cuentas vinculadas en dispositivos con Google Play, comprueba un mensaje
 estado en segundo plano. Abre Near y confirma que el mismo aviso no vuelve a sonar. Prueba el
 silencio, la desvinculación y que un recordatorio abra Horario. Repite el recordatorio con y sin
 el permiso de alarmas exactas.
+
+Para el modo alarma, prueba con la pantalla bloqueada y desbloqueada, con Near cerrado, *Posponer* y
+*Detener* desde la pantalla y desde la notificación, un sonido distinto del predeterminado y el
+reinicio del teléfono con una alarma pendiente.
