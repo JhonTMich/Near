@@ -10,6 +10,7 @@ import com.example.findme.domain.model.validateSchedule
 import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
 import com.example.findme.domain.model.withPauses
+import com.example.findme.domain.model.occurrencesOn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -643,7 +644,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         snapshotMutex.withLock { saveCurrentCache() }
         publishWidgetSnapshot()
     }
-    override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) = perform {
+    override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) =
+        changeOccurrence(draftId, id, originalDate, change, null)
+
+    override fun endActivityNow(id: String, originalDate: String) {
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        val now = java.time.ZonedDateTime.now(zone)
+        val occurrence = _state.value.schedules.occurrencesOn(now.toLocalDate(), zone)
+            .firstOrNull { it.schedule.id == id && it.originalDate.toString() == originalDate } ?: return
+        val change = com.example.findme.domain.model.EndEarly.change(occurrence, now) ?: return
+        changeOccurrence(java.util.UUID.randomUUID().toString(), id, originalDate, change,
+            "Actividad terminada por hoy. Puedes restaurarla desde «Solo esta fecha».")
+    }
+
+    private fun changeOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?, notice: String?) = perform {
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {

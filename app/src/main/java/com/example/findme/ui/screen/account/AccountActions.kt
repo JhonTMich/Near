@@ -34,6 +34,8 @@ interface AccountActions {
     fun testAlarm() {}
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}
     fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) {}
+    /** Ends the activity in progress at the current minute, only for this date. */
+    fun endActivityNow(id: String, originalDate: String) {}
     fun deleteSchedule(id: String) {}
     fun importSchedules(draftId: String, activities: List<ScheduleDto>) {}
     /** [start] and [end] are inclusive "yyyy-MM-dd" dates in the owner's zone. */

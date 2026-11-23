@@ -531,6 +531,11 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
     val status = profile?.let { StatusRepository.calculateStatus(it.displayName, state.schedules, state.statuses, now.dayOfWeek.value, now) }
     val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
     val next = today.firstOrNull { it.window.start.isAfter(now) }
+    // Only your own scheduled activity can be ended; a shared status is changed with its own buttons.
+    val inProgress = (status as? UserCurrentStatus.InClass)?.let { current ->
+        today.firstOrNull { it.schedule.id == current.currentSchedule.id && !now.isBefore(it.window.start) && now.isBefore(it.window.end) }
+    }?.takeIf { com.example.findme.domain.model.EndEarly.change(it, now) != null }
+    var confirmEnd by rememberSaveable { mutableStateOf(false) }
     PageHeading("", "Hoy", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es")))
         .replaceFirstChar { it.titlecase() })
     status?.let { current ->
@@ -569,6 +574,20 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
                 }
                 if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
                     Text("Volver al horario")
+                }
+                inProgress?.let { occurrence ->
+                    OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
+                        Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
+                    }
+                    if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
+                        title = { Text("¿Terminó ${occurrence.schedule.title}?") },
+                        text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
+                            "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
+                        confirmButton = { Button(onClick = {
+                            confirmEnd = false
+                            actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
+                        }) { Text("Terminar") } },
+                        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
                 }
             }
         }
