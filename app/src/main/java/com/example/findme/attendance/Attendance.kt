@@ -84,3 +84,23 @@ object Attendance {
         }.filter { it.days.isNotEmpty() }
     }
 }
+
+/** Leaving the place of an activity well before it ends: Near asks whether it finished early. */
+object LeftEarly {
+    /** Less than this left and it is just leaving a bit early; nothing to ask. */
+    const val MIN_REMAINING_MINUTES = 15L
+
+    /**
+     * The activity in progress that happens at [left], when the phone is in none of its places any more,
+     * at least [MIN_REMAINING_MINUTES] remain and it can still be ended today.
+     */
+    fun occurrence(schedules: List<ScheduleDto>, places: List<AutoPlace>, left: String, inside: Set<String>,
+        now: ZonedDateTime): ScheduleOccurrence? =
+        schedules.occurrencesOn(now.toLocalDate(), now.zone).firstOrNull { occurrence ->
+            val own = AutoPlaces.placesFor(occurrence.schedule, places)
+            !now.isBefore(occurrence.window.start) &&
+                !occurrence.window.end.isBefore(now.plusMinutes(MIN_REMAINING_MINUTES)) &&
+                own.any { it.id == left } && own.none { it.id in inside } &&
+                com.example.findme.domain.model.EndEarly.change(occurrence, now) != null
+        }
+}

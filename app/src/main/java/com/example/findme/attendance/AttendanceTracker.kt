@@ -45,6 +45,16 @@ object AttendanceTracker {
             .forEach { AttendanceUploadWorker.enqueue(context, it) }
         AttendanceCheckWorker.schedule(context, Attendance.nextCheck(own, places, now), fromWorker)
     }
+
+    /** After leaving [left]: asks whether the activity held there ended early, if one is in progress. */
+    suspend fun leftPlace(context: Context, owner: String, left: String, inside: Set<String>) {
+        val data = WidgetStore.data(context)?.takeIf { it.owner == owner } ?: return
+        if (!AccountSettingsRepository(context).settings(owner).first().attendance) return
+        val zone = data.profiles.find { it.id == owner }?.timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() }
+            ?: ZoneId.systemDefault()
+        LeftEarly.occurrence(data.schedules.filter { it.userId == owner }, AutoPlaces.places(context, owner), left, inside,
+            ZonedDateTime.now(zone))?.let { EndEarlyPrompt.show(context, owner, it) }
+    }
 }
 
 /** Looks again when the window of the next tracked activity opens, in case the phone is already there. */

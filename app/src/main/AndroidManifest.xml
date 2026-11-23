@@ -102,6 +102,8 @@
             android:excludeFromRecents="true" />
         <!-- Replies typed in a message notification. Only Android delivers the PendingIntent. -->
         <receiver android:name=".push.MessageReplyReceiver" android:exported="false" />
+        <!-- «Terminar ahora» from the notification shown after leaving the place of an activity early. -->
+        <receiver android:name=".attendance.EndEarlyReceiver" android:exported="false" />
         <!-- Enter and exit of the saved places, delivered by Play services. -->
         <receiver android:name=".places.PlaceTransitionReceiver" android:exported="false" />
         <receiver android:name=".reminders.RemindersRescheduleReceiver" android:exported="false">

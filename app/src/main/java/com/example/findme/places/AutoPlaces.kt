@@ -346,6 +346,7 @@ object AutoPlaces {
         }
         // Arriving at a place may be arriving at an activity; this only reads the cache and enqueues the mark.
         if (entering) runCatching { com.example.findme.attendance.AttendanceTracker.check(context) }
+        else runCatching { com.example.findme.attendance.AttendanceTracker.leftPlace(context, owner, place.id, inside) }
         if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
     }
 
