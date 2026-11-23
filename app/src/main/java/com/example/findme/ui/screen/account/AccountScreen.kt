@@ -1921,6 +1921,7 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
         }
     }
     AutoPlacesPanel(state, actions)
+    AttendancePanel(state, actions)
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2157,6 +2158,74 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
         Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null, category) },
             enabled = !state.busy && ready, modifier = Modifier.fillMaxWidth()) {
             Text(if (state.busy) (if (byAddress) "Guardando…" else "Buscando tu ubicación…") else "Guardar lugar")
+        }
+    }
+}
+
+/**
+ * Attendance to your university and work activities. In-person ones with a saved place of their category
+ * count by themselves; any date can also be marked by hand. Only you can see it.
+ */
+@Composable
+private fun AttendancePanel(state: AccountState, actions: AccountActions) {
+    val enabled = state.settings.attendance
+    LaunchedEffect(enabled) { if (enabled) actions.refreshAttendance() }
+    Panel {
+        SectionHeading(Icons.Default.FactCheck, "Asistencia",
+            "Cuenta a qué clases y turnos fuiste. Solo tú la ves.")
+        AccountSettingsSwitch("Registrar mi asistencia",
+            "Las actividades presenciales cuentan como asistidas si estás en un lugar de su categoría desde 15 min antes. " +
+                "Al salir antes de tiempo te preguntamos si terminó.", enabled) { actions.setAttendance(it) }
+        if (!enabled) return@Panel
+        if (state.autoPlaces.none { it.activityCategory != null }) Text(
+            "Ningún lugar tiene actividades: indica en «Estado automático por lugar» cuál es tu universidad o tu trabajo, " +
+                "o marca la asistencia a mano.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        val zone = state.profile?.zone() ?: ZoneId.systemDefault()
+        val now = profileClock(zone)
+        val since = state.settings.attendanceSince?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: now.toLocalDate()
+        val summaries = remember(state.schedules, state.autoPlaces, state.attendance, since, now.toLocalDate(), now.hour) {
+            com.example.findme.attendance.Attendance.summaries(state.schedules, state.autoPlaces, state.attendance, since, now)
+        }
+        if (summaries.isEmpty()) Text("Aún no terminó ninguna clase o turno desde el ${since.longDate()}.",
+            color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+        summaries.forEach { summary -> AttendanceRow(summary, state, actions) }
+    }
+}
+
+@Composable
+private fun AttendanceRow(summary: com.example.findme.attendance.Attendance.Summary, state: AccountState, actions: AccountActions) {
+    var open by rememberSaveable(summary.schedule.id) { mutableStateOf(false) }
+    HorizontalDivider(color = CardBorder)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { open = !open }.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(summary.schedule.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(
+                "${summary.attended} asistidas", "${summary.missed} faltas",
+                summary.days.count { it.mark == com.example.findme.attendance.Attendance.Mark.Unmarked }.takeIf { it > 0 }?.let { "$it sin marcar" },
+                if (summary.automatic) null else "a mano"
+            ).joinToString(" · "), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Text(summary.rate?.let { "$it %" } ?: "—", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            color = when { summary.rate == null -> TextMuted; summary.rate!! >= 80 -> StatusGreenText; else -> MaterialTheme.colorScheme.error })
+        Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = TextMuted)
+    }
+    if (open) summary.days.take(10).forEach { day ->
+        val date = day.occurrence.originalDate.toString()
+        Column(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(day.occurrence.window.start.toLocalDate().longDate() +
+                if (day.manual) " · marcada a mano" else "", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceChip("Asistí", day.mark == com.example.findme.attendance.Attendance.Mark.Attended, onClick = {
+                    if (!state.busy) actions.markAttendance(summary.schedule.id, date, true)
+                })
+                ChoiceChip("Falté", day.mark == com.example.findme.attendance.Attendance.Mark.Missed, onClick = {
+                    if (!state.busy) actions.markAttendance(summary.schedule.id, date, false)
+                })
+                if (day.manual) TextButton(onClick = { actions.markAttendance(summary.schedule.id, date, null) }, enabled = !state.busy) {
+                    Text("Quitar")
+                }
+            }
         }
     }
 }

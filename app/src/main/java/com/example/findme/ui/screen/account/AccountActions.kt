@@ -55,6 +55,11 @@ interface AccountActions {
      */
     fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?, category: String?) {}
     suspend fun searchAddress(query: String): List<com.example.findme.places.AutoPlaces.Found> = emptyList()
+    /** Keeps your attendance to university and work activities, counting from today the first time. */
+    fun setAttendance(enabled: Boolean) {}
+    fun refreshAttendance() {}
+    /** Marks one date by hand: attended, missed, or null to go back to how Near counts it by itself. */
+    fun markAttendance(scheduleId: String, date: String, present: Boolean?) {}
     /** Shares «En la calle» outside every saved place when there is no activity in progress. */
     fun setStreetStatus(enabled: Boolean) {}
     fun removeAutoPlace(id: String) {}
