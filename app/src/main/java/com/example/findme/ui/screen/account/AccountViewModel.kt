@@ -769,8 +769,18 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
     override suspend fun searchAddress(query: String) =
         runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
+    override fun setStreetStatus(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            preferences.setStreetStatus(id, enabled)
+            // Turning it on checks where the phone is now; turning it off removes only «En la calle».
+            runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = enabled) }
+        }
+    }
     override fun removeAutoPlace(id: String) = perform {
         val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
+        // Without places «En la calle» has no meaning: remove it if it was shared.
+        if (places.isEmpty()) runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication()) }
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
     }
     /** After the location permission changes, so the geofences match what Android now allows. */
