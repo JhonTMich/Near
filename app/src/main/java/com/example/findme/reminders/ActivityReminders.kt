@@ -22,7 +22,8 @@ import java.time.ZonedDateTime
 
 /**
  * "Prácticas empieza en 10 min": one alarm for the next of your own activities. When it fires it shows
- * the reminder and schedules the following one. Your schedule and the switch are read from the widget
+ * the reminder (as a notification, or ringing as an alarm if the person chose it) and schedules the
+ * following one. Your schedule and the switch are read from the widget
  * cache and the account settings, so it works with Near closed and without network.
  */
 object ActivityReminders {
@@ -63,13 +64,14 @@ object ActivityReminders {
         cancel(context)
         val data = WidgetStore.data(context) ?: return
         val settings = AccountSettingsRepository(context).settings(data.owner).first()
-        if (!settings.reminders) return
+        if (!settings.reminders) { ReminderAlarm.cancel(context); return }
         val zone = data.profiles.find { it.id == data.owner }?.timezone
             ?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
         val own = data.schedules.filter { it.userId == data.owner }
         val next = next(own, zone, ZonedDateTime.now(zone), settings.reminderMinutes) ?: return
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        scheduleAlarm(context, alarms, next.remindAt.toInstant().toEpochMilli(), intent(context), clock = false)
+        scheduleAlarm(context, alarms, next.remindAt.toInstant().toEpochMilli(), intent(context),
+            clock = settings.reminderAlarm)
     }
 
     /**
@@ -104,8 +106,11 @@ object ActivityReminders {
             if (settings.reminders && due != null && !due.remindAt.toInstant().isAfter(Instant.now().plusSeconds(60))
                 && due.start.toInstant().isAfter(Instant.now())) {
                 val (title, body) = text(due, minutes)
-                NotificationHelper.show(context, NotificationHelper.Channel.Reminders,
-                    "reminder:${due.schedule.id}".hashCode(), title, body)
+                val ringing = ReminderAlarm.Ringing.of(due.schedule.id, title, body, due.start.toInstant().toEpochMilli(), settings)
+                // Without the exact alarm Android may refuse the alarm from the background: the notification remains.
+                if (!settings.reminderAlarm || !ReminderAlarm.ring(context, ringing))
+                    NotificationHelper.show(context, NotificationHelper.Channel.Reminders,
+                        "reminder:${due.schedule.id}".hashCode(), title, body)
             }
         }
         reschedule(context)

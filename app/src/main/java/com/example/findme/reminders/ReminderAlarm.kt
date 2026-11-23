@@ -124,12 +124,12 @@ object ReminderAlarm {
 
     fun stop(context: Context) {
         if (current.value == null) return
-        context.startService(Intent(context, ReminderAlarmService::class.java).setAction(ACTION_STOP))
+        runCatching { context.startService(Intent(context, ReminderAlarmService::class.java).setAction(ACTION_STOP)) }
     }
 
     fun snooze(context: Context) {
         if (current.value == null) return
-        context.startService(Intent(context, ReminderAlarmService::class.java).setAction(ACTION_SNOOZE))
+        runCatching { context.startService(Intent(context, ReminderAlarmService::class.java).setAction(ACTION_SNOOZE)) }
     }
 
     private fun snoozeIntent(context: Context, ringing: Ringing? = null): PendingIntent {
