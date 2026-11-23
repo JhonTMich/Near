@@ -9,6 +9,12 @@
     <!-- Activity reminders: restored after a reboot, and on time when the person allows exact alarms. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Optional alarm mode: rings with a system sound over the lock screen until stopped. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Automatic status by place (optional, asked for only when a place is saved). -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -88,6 +94,12 @@
         </service>
 
         <receiver android:name=".reminders.ReminderReceiver" android:exported="false" />
+        <receiver android:name=".reminders.ReminderSnoozeReceiver" android:exported="false" />
+        <service android:name=".reminders.ReminderAlarmService" android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+        <activity android:name=".reminders.ReminderAlarmActivity" android:exported="false"
+            android:theme="@style/Theme.Near" android:launchMode="singleTask" android:taskAffinity=""
+            android:excludeFromRecents="true" />
         <!-- Replies typed in a message notification. Only Android delivers the PendingIntent. -->
         <receiver android:name=".push.MessageReplyReceiver" android:exported="false" />
         <!-- Enter and exit of the saved places, delivered by Play services. -->

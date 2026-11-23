@@ -1837,10 +1837,15 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
     var notificationsAllowed by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     var silencedChannels by remember { mutableStateOf(blockedChannels()) }
     var exact by remember { mutableStateOf(com.example.findme.reminders.ActivityReminders.exactAllowed(context)) }
+    // Android 14+ asks the person before an app may open a full screen over the lock screen.
+    fun fullScreenAllowed() = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+        notificationManager?.canUseFullScreenIntent() != false
+    var fullScreen by remember { mutableStateOf(fullScreenAllowed()) }
     androidx.lifecycle.compose.LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
         silencedChannels = blockedChannels()
         exact = com.example.findme.reminders.ActivityReminders.exactAllowed(context)
+        fullScreen = fullScreenAllowed()
     }
     val nearAlerts = with(state.settings) { activities || statuses || messages || reminders }
     var accountSheet by remember { mutableStateOf<AccountSheet?>(null) }
@@ -1882,11 +1887,18 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
                 if (minutes >= 60) "${minutes / 60} h antes" else "$minutes min antes"
             }
             if (!exact && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                Text("Android puede retrasar el recordatorio unos minutos. Permite las alarmas exactas para que llegue a tiempo.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                Text(if (state.settings.reminderAlarm)
+                    "Sin alarmas exactas, Android puede retrasar la alarma o dejarla solo como notificación. Permítelas para que suene a tiempo."
+                    else "Android puede retrasar el recordatorio unos minutos. Permite las alarmas exactas para que llegue a tiempo.",
+                    color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 SettingsRow(Icons.Default.Alarm, "Permitir alarmas exactas") {
                     context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${context.packageName}")))
                 }
             }
+            HorizontalDivider(color = CardBorder)
+            AccountSettingsSwitch("Sonar como alarma", "Suena con un sonido de alarma y ocupa la pantalla hasta que la detengas o la pospongas.",
+                state.settings.reminderAlarm) { actions.setReminderAlarm(it) }
+            if (state.settings.reminderAlarm) ReminderAlarmSettings(state, actions, fullScreen)
         }
     }
     AutoPlacesPanel(state, actions)
@@ -1954,6 +1966,47 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
 }
 
 private enum class AccountSheet { Profile, Password, Delete }
+
+/** Sound, vibration and snooze of the alarm mode. The sounds are the phone's own, chosen with Android's picker. */
+@Composable
+private fun ReminderAlarmSettings(state: AccountState, actions: AccountActions, fullScreen: Boolean) {
+    val context = LocalContext.current
+    val sound = state.settings.alarmSound
+    val soundTitle = remember(sound) { com.example.findme.reminders.ReminderAlarm.soundTitle(context, sound) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val picked = result.data?.let { androidx.core.content.IntentCompat.getParcelableExtra(it,
+            android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI, android.net.Uri::class.java) }
+        // "Predeterminado" follows whatever alarm sound the phone uses, also if it changes later.
+        actions.setAlarmSound(picked?.takeIf { it != Settings.System.DEFAULT_ALARM_ALERT_URI }?.toString())
+    }
+    SettingsRow(Icons.Default.MusicNote, "Sonido: $soundTitle") {
+        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "Sonido de la alarma")
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, Settings.System.DEFAULT_ALARM_ALERT_URI)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                sound?.let(android.net.Uri::parse) ?: Settings.System.DEFAULT_ALARM_ALERT_URI)
+        try { picker.launch(intent) } catch (_: android.content.ActivityNotFoundException) { }
+    }
+    AccountSettingsSwitch("Vibrar", "", state.settings.alarmVibrate) { actions.setAlarmVibrate(it) }
+    Text("Posponer", style = MaterialTheme.typography.titleSmall)
+    Choices(com.example.findme.data.local.ALARM_SNOOZE_CHOICES, state.settings.alarmSnoozeMinutes, actions::setAlarmSnoozeMinutes) { "$it min" }
+    if (!fullScreen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        Text("Android no deja que la alarma se muestre sobre la pantalla bloqueada; sonará, pero solo verás la notificación.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        SettingsRow(Icons.Default.Fullscreen, "Permitir pantalla completa") {
+            try {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    android.net.Uri.parse("package:${context.packageName}")))
+            } catch (_: android.content.ActivityNotFoundException) { }
+        }
+    }
+    SettingsRow(Icons.Default.PlayArrow, "Probar la alarma", chevron = false) { actions.testAlarm() }
+}
 
 /**
  * Automatic status by place. The places are saved only on this phone; the only thing shared is the label,

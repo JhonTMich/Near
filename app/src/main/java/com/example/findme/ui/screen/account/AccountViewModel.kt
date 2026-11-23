@@ -506,6 +506,33 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.reminders.ActivityReminders.reschedule(getApplication())
         }
     }
+    override fun setReminderAlarm(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            preferences.setReminderAlarm(id, enabled)
+            // An alarm is scheduled as a visible alarm clock, a notification as a plain exact alarm.
+            com.example.findme.reminders.ActivityReminders.reschedule(getApplication())
+            if (!enabled) com.example.findme.reminders.ReminderAlarm.cancel(getApplication())
+        }
+    }
+    override fun setAlarmSound(uri: String?) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmSound(id, uri) }
+    }
+    override fun setAlarmVibrate(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmVibrate(id, enabled) }
+    }
+    override fun setAlarmSnoozeMinutes(minutes: Int) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmSnoozeMinutes(id, minutes) }
+    }
+    override fun testAlarm() {
+        val app = getApplication<android.app.Application>()
+        val ringing = com.example.findme.reminders.ReminderAlarm.Ringing.of("test", "Así sonará tu alarma",
+            "Prueba de los recordatorios de Near", startsAt = 0L, settings = _state.value.settings)
+        com.example.findme.reminders.ReminderAlarm.ring(app, ringing)
+    }
 
     override fun refresh() = perform(quiet = true, failure = LOAD_FAILED) { load() }
     override fun register(name: String, email: String, username: String, password: String, confirmation: String) = perform {
