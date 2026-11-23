@@ -35,7 +35,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import com.example.findme.data.model.ScheduleDto
+import com.example.findme.domain.model.nextOccurrence
+import com.example.findme.domain.model.occurrencesOn
 import java.time.Instant
+import java.time.ZonedDateTime
 import java.util.UUID
 import kotlin.coroutines.resume
 
@@ -150,6 +154,45 @@ object AutoPlaces {
         data class Share(val label: String, val placeId: String) : Change
         data object Clear : Change
         data object Nothing : Change
+        /** Outside every saved place and with no activity now: «En la calle» until the next one starts. */
+        data class Street(val minutes: Long) : Change
+    }
+
+    /** The status shared outside every saved place, when the person turns it on. */
+    const val STREET = "En la calle"
+    /** Marker of the automatic «En la calle» status, so it is told apart from a place or a manual status. */
+    const val STREET_MARKER = "street"
+
+    /**
+     * Your own activities as they matter for «En la calle»: [busyUntil] is the end of the activity in
+     * progress (the latest one if several overlap), [nextStart]/[nextEnd] the window of the next one.
+     */
+    data class Agenda(val busyUntil: Instant?, val nextStart: Instant?, val nextEnd: Instant?) {
+        /** When «En la calle» has to be decided again: when the current activity ends, or the next one does. */
+        val nextCheck: Instant? get() = busyUntil ?: nextEnd
+    }
+
+    fun agenda(schedules: List<ScheduleDto>, now: ZonedDateTime): Agenda {
+        val busyUntil = schedules.occurrencesOn(now.toLocalDate(), now.zone)
+            .filter { !it.window.start.isAfter(now) && it.window.end.isAfter(now) }
+            .maxOfOrNull { it.window.end.toInstant() }
+        val next = schedules.mapNotNull { it.nextOccurrence(now) }.minByOrNull { it.window.start.toInstant() }
+        return Agenda(busyUntil, next?.window?.start?.toInstant(), next?.window?.end?.toInstant())
+    }
+
+    /**
+     * «En la calle» when the person is in none of their saved places. The schedule wins: during an
+     * activity nothing is shared, so people see the activity, and the status ends when the next one starts.
+     * A status shared by hand is never touched; turning the option off removes only its own status.
+     */
+    fun street(enabled: Boolean, hasPlaces: Boolean, inside: Set<String>, marker: String?, manualStatus: Boolean,
+        agenda: Agenda, now: Instant): Change {
+        val ours = marker == STREET_MARKER
+        if (manualStatus || inside.isNotEmpty()) return Change.Nothing
+        if (!enabled || !hasPlaces || agenda.busyUntil != null) return if (ours) Change.Clear else Change.Nothing
+        val minutes = agenda.nextStart?.let { java.time.Duration.between(now, it).toMinutes() } ?: STATUS_MINUTES
+        return if (minutes < 1) { if (ours) Change.Clear else Change.Nothing }
+            else Change.Street(minutes.coerceAtMost(STATUS_MINUTES))
     }
 
     /**
@@ -183,7 +226,7 @@ object AutoPlaces {
                 repository.clearStatus()
                 context.dataStore.edit { it.remove(markerKey(owner)) }
             }
-            Change.Nothing -> return
+            is Change.Street, Change.Nothing -> return
         }
         GlanceWidgetWorker.enqueueRefresh(context)
     }
