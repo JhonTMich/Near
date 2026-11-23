@@ -104,6 +104,8 @@ jobs:
       - name: Build release and run Android checks
         env:
           NEAR_FIREBASE_CONFIG: ${{ (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && secrets.NEAR_FIREBASE_CONFIG || '' }}
+          # Only for the published APK, like Firebase; pull request builds hide the map option.
+          MAPS_API_KEY: ${{ (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && secrets.MAPS_API_KEY || '' }}
           RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
           RELEASE_VERSION_CODE: ${{ steps.metadata.outputs.version_code }}
         run: |

@@ -2100,13 +2100,17 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
     if (adding) AutoPlaceSheet(state, actions) { adding = false }
 }
 
+private enum class PlaceSource(val label: String) { Here("Dónde estoy ahora"), Address("Buscar dirección"), Map("En el mapa") }
+private const val MAP_POINT = "Punto elegido en el mapa"
+
 @Composable
 private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
     var label by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.LABELS.first()) }
     var submitted by remember { mutableStateOf(false) }
     val count = state.autoPlaces.size
     LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
-    var byAddress by rememberSaveable { mutableStateOf(false) }
+    var source by rememberSaveable { mutableStateOf(PlaceSource.Here) }
+    val byAddress = source != PlaceSource.Here
     // Follows the chosen label («En el trabajo» → Trabajo) until the person picks one themselves.
     var categoryTouched by rememberSaveable { mutableStateOf(false) }
     var category by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.suggestedCategory(label)) }
@@ -2118,11 +2122,14 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
     var searching by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    Sheet(dismiss, "Añadir lugar", "Al llegar a esta zona compartiremos el estado que elijas.") {
+    // With a map on screen, dragging should move the map, not close the sheet.
+    Sheet(dismiss, "Añadir lugar", "Al llegar a esta zona compartiremos el estado que elijas.",
+        gesturesEnabled = !(com.example.findme.BuildConfig.MAPS_ENABLED && source != PlaceSource.Here)) {
         Choices(com.example.findme.places.AutoPlaces.LABELS, label, { label = it }) { it }
         Field(label, { label = it.take(60) }, "Estado al llegar")
-        Choices(listOf(false, true), byAddress, { byAddress = it }) { if (it) "Buscar dirección" else "Dónde estoy ahora" }
-        if (byAddress) {
+        Choices(PlaceSource.entries.filter { it != PlaceSource.Map || com.example.findme.BuildConfig.MAPS_ENABLED }, source,
+            { source = it; chosen = null; results = emptyList(); searched = false }) { it.label }
+        if (source == PlaceSource.Address) {
             Field(query, { query = it.take(200); chosen = null; searched = false }, "Dirección o nombre del lugar")
             OutlinedButton(onClick = {
                 searching = true
@@ -2144,6 +2151,23 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
                     Text(found.address, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
+        }
+        val point = chosen?.let { com.google.android.gms.maps.model.LatLng(it.latitude, it.longitude) }
+        if (source == PlaceSource.Address && chosen != null && com.example.findme.BuildConfig.MAPS_ENABLED) {
+            Text("Toca el mapa para ajustar el punto.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+            ZonePicker(point, radius, onPick = { chosen = chosen?.copy(latitude = it.latitude, longitude = it.longitude) })
+        }
+        if (source == PlaceSource.Map) {
+            val context = LocalContext.current
+            // Opens where you are, without choosing it: the point is only set by tapping.
+            var here by remember { mutableStateOf<com.google.android.gms.maps.model.LatLng?>(null) }
+            LaunchedEffect(Unit) {
+                com.example.findme.places.AutoPlaces.currentLocation(context)?.let { here = com.google.android.gms.maps.model.LatLng(it.latitude, it.longitude) }
+            }
+            Text(if (chosen == null) "Toca el mapa donde está el lugar." else "Toca otra parte del mapa para moverlo.",
+                color = TextMuted, style = MaterialTheme.typography.bodySmall)
+            ZonePicker(point, radius, center = here,
+                onPick = { chosen = com.example.findme.places.AutoPlaces.Found(MAP_POINT, it.latitude, it.longitude) })
         }
         Text("Tamaño de la zona", style = MaterialTheme.typography.titleSmall)
         Choices(com.example.findme.places.AutoPlaces.RADIUS_CHOICES, radius, { radius = it }) { "${it.toInt()} m" }
