@@ -50,3 +50,10 @@ La app funciona aunque falten las migraciones: cada sección nueva se lee por se
 - Base de datos (PGlite, sin conexión al proyecto): `test_schedule_pauses`, `test_one_off_activities`, `test_free_alerts`, `test_plan_proposals` y `test_person_groups`, sobre `scripts/schema_harness.mjs`, que aplica todas las migraciones y simula Vault y pg_net.
 - JVM: `SchedulePausesTest`, `OneOffActivityTest`, `FreeAlertPushTest`, `PlansTest`, `MessageRepliesTest`, `StatusUntilTest`, `PeopleRowsTest`, `AutoPlacesTest`, `StreetStatusTest`, `IcsImportTest` y `AccountExportTest`.
 - Queda por probar en un teléfono real: geovallas, respuesta desde la notificación, los dos widgets y los pushes nuevos.
+
+### Zona en el mapa
+
+- Al añadir un lugar hay una tercera opción, **«En el mapa»**: el mapa se abre donde estás y el lugar se fija tocando el punto. Tras **buscar una dirección**, el mapa también sirve para ajustar el punto. El círculo muestra el tamaño de la zona (100 a 500 m).
+- Usa Google Maps (Maps Compose). La clave `MAPS_API_KEY` se lee del secreto de GitHub al compilar el APK publicado, o de `local.properties` en local. **Nunca se sube al repositorio.** Sin clave la app compila igual y la opción del mapa no aparece, como en los PR.
+- La clave está restringida en Google Cloud a **Maps SDK for Android** y al paquete `com.example.near` con las huellas SHA-1 de release (`C3:CA:AC:52:…:C5:67`) y debug. Mostrar el mapa en Android no tiene coste; el proyecto de Google Cloud necesita una cuenta de facturación.
+- Si cambia el certificado de firma (por ejemplo, con una rotación de clave), hay que añadir su SHA-1 a la clave en Google Cloud o el mapa saldrá en gris.
