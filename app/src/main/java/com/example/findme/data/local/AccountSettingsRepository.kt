@@ -26,7 +26,9 @@ data class AccountSettings(
     val alarmSound: String? = null,
     val alarmVibrate: Boolean = true,
     /** How long "Posponer" waits before ringing again: one of [ALARM_SNOOZE_CHOICES]. */
-    val alarmSnoozeMinutes: Int = ALARM_SNOOZE_CHOICES.first()
+    val alarmSnoozeMinutes: Int = ALARM_SNOOZE_CHOICES.first(),
+    /** Shares «En la calle» outside every saved place; off because it tells people when you are out. */
+    val streetStatus: Boolean = false
 )
 
 val REMINDER_CHOICES = listOf(10, 30, 60)
@@ -42,6 +44,7 @@ class AccountSettingsRepository(context: Context) {
     private fun alarmSoundKey(id: String) = stringPreferencesKey("account_${id}_alarm_sound")
     private fun alarmVibrateKey(id: String) = booleanPreferencesKey("account_${id}_alarm_vibrate")
     private fun alarmSnoozeKey(id: String) = intPreferencesKey("account_${id}_alarm_snooze")
+    private fun streetKey(id: String) = booleanPreferencesKey("account_${id}_street_status")
     private fun theme(value: String?) = AppTheme.entries.find { it.name == value } ?: AppTheme.Dark
     val theme = store.data.map { theme(it[themeKey]) }.distinctUntilChanged()
     fun settings(id: String) = store.data.map { prefs -> AccountSettings(
@@ -54,7 +57,8 @@ class AccountSettingsRepository(context: Context) {
         reminderAlarm = prefs[alarmKey(id)] ?: false,
         alarmSound = prefs[alarmSoundKey(id)]?.takeIf { it.isNotBlank() },
         alarmVibrate = prefs[alarmVibrateKey(id)] ?: true,
-        alarmSnoozeMinutes = prefs[alarmSnoozeKey(id)]?.takeIf { it in ALARM_SNOOZE_CHOICES } ?: ALARM_SNOOZE_CHOICES.first()
+        alarmSnoozeMinutes = prefs[alarmSnoozeKey(id)]?.takeIf { it in ALARM_SNOOZE_CHOICES } ?: ALARM_SNOOZE_CHOICES.first(),
+        streetStatus = prefs[streetKey(id)] ?: false
     ) }.distinctUntilChanged()
     suspend fun setAlert(id: String, alert: AccountAlert, enabled: Boolean) {
         store.edit { it[alertKey(id, alert)] = enabled }
@@ -74,5 +78,6 @@ class AccountSettingsRepository(context: Context) {
         require(minutes in ALARM_SNOOZE_CHOICES)
         store.edit { it[alarmSnoozeKey(id)] = minutes }
     }
+    suspend fun setStreetStatus(id: String, enabled: Boolean) { store.edit { it[streetKey(id)] = enabled } }
     suspend fun setTheme(value: AppTheme) { store.edit { it[themeKey] = value.name } }
 }

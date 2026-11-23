@@ -758,16 +758,29 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.places.AutoPlaces.register(getApplication(), null)
         }
     }
-    override fun addAutoPlace(label: String) = perform {
+    override fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?) = perform {
         com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
         val owner = repository.userId()
-        val location = com.example.findme.places.AutoPlaces.currentLocation(getApplication())
+        val (latitude, longitude) = at?.let { it.latitude to it.longitude }
+            ?: com.example.findme.places.AutoPlaces.currentLocation(getApplication())?.let { it.latitude to it.longitude }
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
-        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, location)
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+    }
+    override suspend fun searchAddress(query: String) =
+        runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
+    override fun setStreetStatus(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            preferences.setStreetStatus(id, enabled)
+            // Turning it on checks where the phone is now; turning it off removes only «En la calle».
+            runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = enabled) }
+        }
     }
     override fun removeAutoPlace(id: String) = perform {
         val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
+        // Without places «En la calle» has no meaning: remove it if it was shared.
+        if (places.isEmpty()) runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication()) }
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
     }
     /** After the location permission changes, so the geofences match what Android now allows. */

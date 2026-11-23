@@ -12,6 +12,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.example.findme.data.local.AccountSettingsRepository
 import com.example.findme.data.local.dataStore
 import com.example.findme.data.network.SupabaseClientProvider
 import com.example.findme.data.repository.AccountRepository
@@ -35,13 +36,19 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import com.example.findme.data.model.ScheduleDto
+import com.example.findme.domain.model.nextOccurrence
+import com.example.findme.domain.model.occurrencesOn
 import java.time.Instant
+import java.time.ZonedDateTime
 import java.util.UUID
 import kotlin.coroutines.resume
 
 /** A place saved on this phone. Its coordinates never leave the device; only [label] is shared as a status. */
 @Serializable
-data class AutoPlace(val id: String, val label: String, val latitude: Double, val longitude: Double, val radius: Float = AutoPlaces.RADIUS)
+data class AutoPlace(val id: String, val label: String, val latitude: Double, val longitude: Double, val radius: Float = AutoPlaces.RADIUS,
+    /** The address it was found by, only to recognise it in the list; null when saved from the current location. */
+    val address: String? = null)
 
 /**
  * Automatic status by place: arriving at a saved place shares its label («En casa»), leaving it removes
@@ -50,6 +57,8 @@ data class AutoPlace(val id: String, val label: String, val latitude: Double, va
 object AutoPlaces {
     const val MAX = 5
     const val RADIUS = 150f
+    /** Zone sizes in metres: a house or an office, up to a whole campus. Android recommends at least 100 m. */
+    val RADIUS_CHOICES = listOf(100f, 150f, 300f, 500f)
     /** How long an automatic status lasts if the phone never reports leaving: the maximum for a status. */
     const val STATUS_MINUTES = 1440L
     val LABELS = listOf("En casa", "En la universidad", "En el trabajo", "En el gimnasio")
@@ -57,6 +66,7 @@ object AutoPlaces {
     private fun placesKey(owner: String) = stringPreferencesKey("auto_places_$owner")
     /** Which place set the current automatic status, so leaving another place or a manual status is left alone. */
     private fun markerKey(owner: String) = stringPreferencesKey("auto_status_$owner")
+    private fun insideKey(owner: String) = stringPreferencesKey("auto_inside_$owner")
 
     fun validateLabel(label: String): String? =
         if (label.isBlank() || label.trim().length > 60) "Escribe cómo quieres que se vea, de 1 a 60 caracteres." else null
@@ -76,14 +86,47 @@ object AutoPlaces {
 
     fun encode(places: List<AutoPlace>): String = json.encodeToString(ListSerializer(AutoPlace.serializer()), places)
 
-    suspend fun add(context: Context, owner: String, label: String, location: Location): List<AutoPlace> {
+    suspend fun add(context: Context, owner: String, label: String, latitude: Double, longitude: Double,
+        radius: Float = RADIUS, address: String? = null): List<AutoPlace> {
         validateLabel(label)?.let { throw IllegalArgumentException(it) }
+        require(radius in RADIUS_CHOICES) { "Elige el tamaño de la zona." }
         val current = places(context, owner)
         require(current.size < MAX) { "Puedes guardar hasta $MAX lugares. Quita uno para añadir otro." }
-        val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), location.latitude, location.longitude)
+        val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), latitude, longitude, radius,
+            address?.trim()?.takeIf { it.isNotEmpty() })
         context.dataStore.edit { it[placesKey(owner)] = encode(updated) }
         register(context, owner)
         return updated
+    }
+
+    /** An address found by the phone's geocoder, ready to be saved as a place. */
+    data class Found(val address: String, val latitude: Double, val longitude: Double)
+
+    /**
+     * Looks up [query] («Av. Universitaria 1801, Lima») with Android's geocoder. Only the text goes to the
+     * geocoding service of the phone; nothing is sent to Near's server. Empty when there is no geocoder.
+     */
+    suspend fun search(context: Context, query: String): List<Found> {
+        val text = query.trim()
+        if (text.length < 3 || !android.location.Geocoder.isPresent()) return emptyList()
+        val geocoder = android.location.Geocoder(context)
+        val addresses: List<android.location.Address> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            withTimeoutOrNull(15_000) {
+                suspendCancellableCoroutine { continuation ->
+                    geocoder.getFromLocationName(text, 5, object : android.location.Geocoder.GeocodeListener {
+                        override fun onGeocode(found: MutableList<android.location.Address>) { continuation.resume(found) }
+                        override fun onError(message: String?) { continuation.resume(emptyList()) }
+                    })
+                }
+            }.orEmpty()
+        } else kotlinx.coroutines.withContext(Dispatchers.IO) {
+            @Suppress("DEPRECATION")
+            runCatching { geocoder.getFromLocationName(text, 5) }.getOrNull().orEmpty()
+        }
+        return addresses.filter { it.hasLatitude() && it.hasLongitude() }.map { address ->
+            val line = (0..address.maxAddressLineIndex).mapNotNull { address.getAddressLine(it) }.joinToString(", ")
+            Found(line.ifBlank { text }, address.latitude, address.longitude)
+        }.distinctBy { it.latitude to it.longitude }
     }
 
     suspend fun remove(context: Context, owner: String, id: String): List<AutoPlace> {
@@ -113,7 +156,9 @@ object AutoPlaces {
         val client = LocationServices.getGeofencingClient(context)
         runCatching { client.removeGeofences(pendingIntent(context)).awaitDone() }
         val places = owner?.let { places(context, it) }.orEmpty()
-        if (places.isEmpty() || !hasLocation(context)) return
+        // The initial enter trigger reports again the places the phone is in now.
+        if (owner != null) setInside(context, owner, emptySet())
+        if (places.isEmpty() || !hasLocation(context)) { StreetStatusWorker.cancel(context); return }
         val request = GeofencingRequest.Builder()
             .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
             .addGeofences(places.map { place ->
@@ -150,6 +195,45 @@ object AutoPlaces {
         data class Share(val label: String, val placeId: String) : Change
         data object Clear : Change
         data object Nothing : Change
+        /** Outside every saved place and with no activity now: «En la calle» until the next one starts. */
+        data class Street(val minutes: Long) : Change
+    }
+
+    /** The status shared outside every saved place, when the person turns it on. */
+    const val STREET = "En la calle"
+    /** Marker of the automatic «En la calle» status, so it is told apart from a place or a manual status. */
+    const val STREET_MARKER = "street"
+
+    /**
+     * Your own activities as they matter for «En la calle»: [busyUntil] is the end of the activity in
+     * progress (the latest one if several overlap), [nextStart]/[nextEnd] the window of the next one.
+     */
+    data class Agenda(val busyUntil: Instant?, val nextStart: Instant?, val nextEnd: Instant?) {
+        /** When «En la calle» has to be decided again: when the current activity ends, or the next one does. */
+        val nextCheck: Instant? get() = busyUntil ?: nextEnd
+    }
+
+    fun agenda(schedules: List<ScheduleDto>, now: ZonedDateTime): Agenda {
+        val busyUntil = schedules.occurrencesOn(now.toLocalDate(), now.zone)
+            .filter { !it.window.start.isAfter(now) && it.window.end.isAfter(now) }
+            .maxOfOrNull { it.window.end.toInstant() }
+        val next = schedules.mapNotNull { it.nextOccurrence(now) }.minByOrNull { it.window.start.toInstant() }
+        return Agenda(busyUntil, next?.window?.start?.toInstant(), next?.window?.end?.toInstant())
+    }
+
+    /**
+     * «En la calle» when the person is in none of their saved places. The schedule wins: during an
+     * activity nothing is shared, so people see the activity, and the status ends when the next one starts.
+     * A status shared by hand is never touched; turning the option off removes only its own status.
+     */
+    fun street(enabled: Boolean, hasPlaces: Boolean, inside: Set<String>, marker: String?, manualStatus: Boolean,
+        agenda: Agenda, now: Instant): Change {
+        val ours = marker == STREET_MARKER
+        if (manualStatus || inside.isNotEmpty()) return Change.Nothing
+        if (!enabled || !hasPlaces || agenda.busyUntil != null) return if (ours) Change.Clear else Change.Nothing
+        val minutes = agenda.nextStart?.let { java.time.Duration.between(now, it).toMinutes() } ?: STATUS_MINUTES
+        return if (minutes < 1) { if (ours) Change.Clear else Change.Nothing }
+            else Change.Street(minutes.coerceAtMost(STATUS_MINUTES))
     }
 
     /**
@@ -163,29 +247,97 @@ object AutoPlaces {
         else -> Change.Nothing
     }
 
-    internal suspend fun handle(context: Context, entering: Boolean, placeIds: List<String>) {
-        val auth = SupabaseClientProvider.client.auth
-        auth.awaitInitialization()
-        val owner = auth.currentUserOrNull()?.id ?: return
-        val place = places(context, owner).firstOrNull { it.id in placeIds } ?: return
+    /** The saved places the phone is in now, kept from the enter and exit transitions. */
+    private suspend fun inside(context: Context, owner: String): Set<String> =
+        context.dataStore.data.first()[insideKey(owner)]?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+
+    private suspend fun setInside(context: Context, owner: String, ids: Set<String>) {
+        context.dataStore.edit { if (ids.isEmpty()) it.remove(insideKey(owner)) else it[insideKey(owner)] = ids.joinToString(",") }
+    }
+
+    /** What «En la calle» needs to know about the owner, read from the cache so it works offline. */
+    private class Situation(val owner: String, val marker: String?, val manualStatus: Boolean, val agenda: Agenda)
+
+    private suspend fun situation(context: Context, owner: String): Situation {
         val marker = context.dataStore.data.first()[markerKey(owner)]
         val now = Instant.now()
-        val ownActive = WidgetStore.data(context)?.takeIf { it.owner == owner }?.statuses.orEmpty().any { status ->
+        val data = WidgetStore.data(context)?.takeIf { it.owner == owner }
+        val ownActive = data?.statuses.orEmpty().any { status ->
             status.userId == owner && status.isActive && StatusRepository.parseIsoToInstant(status.expiresAt)?.isAfter(now) == true
         }
+        val zone = data?.profiles?.find { it.id == owner }?.timezone
+            ?.let { runCatching { java.time.ZoneId.of(it) }.getOrNull() } ?: java.time.ZoneId.systemDefault()
+        val agenda = agenda(data?.schedules.orEmpty().filter { it.userId == owner }, ZonedDateTime.now(zone))
+        return Situation(owner, marker, ownActive && marker == null, agenda)
+    }
+
+    private suspend fun apply(context: Context, owner: String, change: Change): Boolean {
         val repository = AccountRepository()
-        when (val change = decide(entering, place, marker, manualStatus = ownActive && marker == null)) {
+        when (change) {
             is Change.Share -> {
                 repository.setStatus(change.label, STATUS_MINUTES)
                 context.dataStore.edit { it[markerKey(owner)] = change.placeId }
+            }
+            is Change.Street -> {
+                repository.setStatus(STREET, change.minutes)
+                context.dataStore.edit { it[markerKey(owner)] = STREET_MARKER }
             }
             Change.Clear -> {
                 repository.clearStatus()
                 context.dataStore.edit { it.remove(markerKey(owner)) }
             }
-            Change.Nothing -> return
+            Change.Nothing -> return false
         }
-        GlanceWidgetWorker.enqueueRefresh(context)
+        return true
+    }
+
+    private suspend fun streetChange(context: Context, owner: String, inside: Set<String>, situation: Situation,
+        fromWorker: Boolean = false): Change {
+        val settings = AccountSettingsRepository(context).settings(owner).first()
+        val change = street(settings.streetStatus, places(context, owner).isNotEmpty(), inside, situation.marker,
+            situation.manualStatus, situation.agenda, Instant.now())
+        // While the option is on, decide again when the activity in progress (or the next one) ends.
+        if (settings.streetStatus) StreetStatusWorker.schedule(context, situation.agenda.nextCheck, fromWorker)
+        else if (!fromWorker) StreetStatusWorker.cancel(context)
+        return change
+    }
+
+    internal suspend fun handle(context: Context, entering: Boolean, placeIds: List<String>) {
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val owner = auth.currentUserOrNull()?.id ?: return
+        val places = places(context, owner)
+        val place = places.firstOrNull { it.id in placeIds } ?: return
+        val inside = (if (entering) inside(context, owner) + placeIds else inside(context, owner) - placeIds.toSet())
+            .filter { id -> places.any { it.id == id } }.toSet()
+        setInside(context, owner, inside)
+        val situation = situation(context, owner)
+        val change = when {
+            entering -> decide(true, place, situation.marker, situation.manualStatus)
+            // Two places that touch: leaving one while still in the other shares the other.
+            inside.isNotEmpty() && situation.marker == place.id ->
+                places.first { it.id in inside }.let { Change.Share(it.label, it.id) }
+            else -> streetChange(context, owner, inside, situation).takeUnless { it == Change.Nothing }
+                ?: decide(false, place, situation.marker, situation.manualStatus)
+        }
+        if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
+    }
+
+    /**
+     * Decides «En la calle» again without a transition: when an activity ends and when the option changes.
+     * With [locate], first checks the current location against the places, in case no transition arrived yet.
+     */
+    suspend fun reconcile(context: Context, locate: Boolean = false, fromWorker: Boolean = false) {
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val owner = auth.currentUserOrNull()?.id ?: return
+        if (locate) currentLocation(context)?.let { here ->
+            setInside(context, owner, places(context, owner).filter { place ->
+                FloatArray(1).also { Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, it) }[0] <= place.radius
+            }.map { it.id }.toSet())
+        }
+        val change = streetChange(context, owner, inside(context, owner), situation(context, owner), fromWorker)
+        if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
     }
 }
 

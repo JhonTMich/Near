@@ -2041,7 +2041,11 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
         state.autoPlaces.forEach { place ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(place.label, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Column(Modifier.weight(1f)) {
+                    Text(place.label, fontWeight = FontWeight.SemiBold)
+                    Text(listOfNotNull(place.address, "${place.radius.toInt()} m").joinToString(" · "),
+                        color = TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 IconButton(onClick = { actions.removeAutoPlace(place.id) }, enabled = !state.busy) {
                     Icon(Icons.Default.DeleteOutline, "Quitar ${place.label}", tint = TextMuted)
                 }
@@ -2059,11 +2063,17 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
             color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         Text("Un estado que compartas a mano no se reemplaza ni se quita al llegar o salir.", color = TextMuted,
             style = MaterialTheme.typography.bodySmall)
+        if (state.autoPlaces.isNotEmpty()) {
+            HorizontalDivider(color = CardBorder)
+            AccountSettingsSwitch("«${com.example.findme.places.AutoPlaces.STREET}» fuera de tus lugares",
+                "Al salir de todos tus lugares lo compartimos, salvo durante tus actividades: entonces se ve tu horario. " +
+                    "Tu gente sabrá cuándo estás fuera.", state.settings.streetStatus) { actions.setStreetStatus(it) }
+        }
         if (state.autoPlaces.size < com.example.findme.places.AutoPlaces.MAX) OutlinedButton(onClick = {
             if (location) adding = true
             else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
         }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.AddLocationAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Guardar dónde estoy ahora")
+            Icon(Icons.Default.AddLocationAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Añadir lugar")
         }
     }
     if (adding) AutoPlaceSheet(state, actions) { adding = false }
@@ -2075,13 +2085,48 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
     var submitted by remember { mutableStateOf(false) }
     val count = state.autoPlaces.size
     LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
-    Sheet(dismiss, "Guardar este lugar", "Usaremos tu ubicación actual, con un radio de unos 150 metros.") {
+    var byAddress by rememberSaveable { mutableStateOf(false) }
+    var radius by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.RADIUS) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<com.example.findme.places.AutoPlaces.Found>>(emptyList()) }
+    var chosen by remember { mutableStateOf<com.example.findme.places.AutoPlaces.Found?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Sheet(dismiss, "Añadir lugar", "Al llegar a esta zona compartiremos el estado que elijas.") {
         Choices(com.example.findme.places.AutoPlaces.LABELS, label, { label = it }) { it }
         Field(label, { label = it.take(60) }, "Estado al llegar")
+        Choices(listOf(false, true), byAddress, { byAddress = it }) { if (it) "Buscar dirección" else "Dónde estoy ahora" }
+        if (byAddress) {
+            Field(query, { query = it.take(200); chosen = null; searched = false }, "Dirección o nombre del lugar")
+            OutlinedButton(onClick = {
+                searching = true
+                scope.launch {
+                    results = actions.searchAddress(query)
+                    chosen = results.singleOrNull()
+                    searching = false; searched = true
+                }
+            }, enabled = !searching && query.trim().length >= 3, modifier = Modifier.fillMaxWidth()) {
+                if (searching) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp)); Text(if (searching) "Buscando…" else "Buscar")
+            }
+            if (searched && results.isEmpty()) FormProblem("No encontramos esa dirección. Prueba con la calle, el número y la ciudad.")
+            results.forEach { found ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { chosen = found }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RadioButton(selected = chosen == found, onClick = { chosen = found })
+                    Text(found.address, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        Text("Tamaño de la zona", style = MaterialTheme.typography.titleSmall)
+        Choices(com.example.findme.places.AutoPlaces.RADIUS_CHOICES, radius, { radius = it }) { "${it.toInt()} m" }
         (com.example.findme.places.AutoPlaces.validateLabel(label) ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
-        Button(onClick = { submitted = true; actions.addAutoPlace(label) },
-            enabled = !state.busy && com.example.findme.places.AutoPlaces.validateLabel(label) == null, modifier = Modifier.fillMaxWidth()) {
-            Text(if (state.busy) "Buscando tu ubicación…" else "Guardar lugar")
+        val ready = com.example.findme.places.AutoPlaces.validateLabel(label) == null && (!byAddress || chosen != null)
+        Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null) },
+            enabled = !state.busy && ready, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.busy) (if (byAddress) "Guardando…" else "Buscando tu ubicación…") else "Guardar lugar")
         }
     }
 }
