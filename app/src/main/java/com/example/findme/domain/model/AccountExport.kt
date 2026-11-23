@@ -18,7 +18,8 @@ object AccountExport {
         exportedAt: String,
         pauses: List<SchedulePause> = emptyList(),
         groups: List<PersonGroup> = emptyList(),
-        groupMembers: List<PersonGroupMember> = emptyList()
+        groupMembers: List<PersonGroupMember> = emptyList(),
+        attendance: List<ActivityAttendance> = emptyList()
     ): String {
         val names = people.associate { it.id to it.displayName }
         return json.encodeToString(JsonObject.serializer(), buildJsonObject {
@@ -41,6 +42,15 @@ object AccountExport {
             putJsonArray("schedule_pauses") {
                 pauses.filter { it.userId == profile.id }.sortedBy { it.startDate }.forEach { pause ->
                     addJsonObject { put("title", pause.title); put("start_date", pause.startDate); put("end_date", pause.endDate) }
+                }
+            }
+            putJsonArray("attendance") {
+                val titles = schedules.filter { it.userId == profile.id }.associate { it.id to it.title }
+                attendance.sortedWith(compareBy({ it.occurrenceDate }, { titles[it.scheduleId].orEmpty() })).forEach { mark ->
+                    addJsonObject {
+                        put("activity", titles[mark.scheduleId] ?: "Actividad eliminada"); put("date", mark.occurrenceDate)
+                        put("status", mark.status); put("source", mark.source)
+                    }
                 }
             }
             putJsonArray("shared_status") {

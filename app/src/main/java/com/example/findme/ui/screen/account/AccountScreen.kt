@@ -531,6 +531,11 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
     val status = profile?.let { StatusRepository.calculateStatus(it.displayName, state.schedules, state.statuses, now.dayOfWeek.value, now) }
     val today = state.schedules.occurrencesOn(now.toLocalDate(), now.zone)
     val next = today.firstOrNull { it.window.start.isAfter(now) }
+    // Only your own scheduled activity can be ended; a shared status is changed with its own buttons.
+    val inProgress = (status as? UserCurrentStatus.InClass)?.let { current ->
+        today.firstOrNull { it.schedule.id == current.currentSchedule.id && !now.isBefore(it.window.start) && now.isBefore(it.window.end) }
+    }?.takeIf { com.example.findme.domain.model.EndEarly.change(it, now) != null }
+    var confirmEnd by rememberSaveable { mutableStateOf(false) }
     PageHeading("", "Hoy", now.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLanguageTag("es")))
         .replaceFirstChar { it.titlecase() })
     status?.let { current ->
@@ -569,6 +574,20 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
                 }
                 if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
                     Text("Volver al horario")
+                }
+                inProgress?.let { occurrence ->
+                    OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
+                        Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
+                    }
+                    if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
+                        title = { Text("¿Terminó ${occurrence.schedule.title}?") },
+                        text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
+                            "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
+                        confirmButton = { Button(onClick = {
+                            confirmEnd = false
+                            actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
+                        }) { Text("Terminar") } },
+                        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
                 }
             }
         }
@@ -1902,6 +1921,7 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
         }
     }
     AutoPlacesPanel(state, actions)
+    AttendancePanel(state, actions)
     Panel {
         SectionHeading(Icons.Default.Palette, "Apariencia")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2043,7 +2063,8 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
                 Icon(Icons.Default.Place, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
                     Text(place.label, fontWeight = FontWeight.SemiBold)
-                    Text(listOfNotNull(place.address, "${place.radius.toInt()} m").joinToString(" · "),
+                    Text(listOfNotNull(place.activityCategory?.let { com.example.findme.data.model.ActivityCategory.fromKey(it).label },
+                        place.address, "${place.radius.toInt()} m").joinToString(" · "),
                         color = TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { actions.removeAutoPlace(place.id) }, enabled = !state.busy) {
@@ -2086,6 +2107,10 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
     val count = state.autoPlaces.size
     LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
     var byAddress by rememberSaveable { mutableStateOf(false) }
+    // Follows the chosen label («En el trabajo» → Trabajo) until the person picks one themselves.
+    var categoryTouched by rememberSaveable { mutableStateOf(false) }
+    var category by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.suggestedCategory(label)) }
+    LaunchedEffect(label) { if (!categoryTouched) category = com.example.findme.places.AutoPlaces.suggestedCategory(label) }
     var radius by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.RADIUS) }
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<com.example.findme.places.AutoPlaces.Found>>(emptyList()) }
@@ -2124,9 +2149,83 @@ private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss
         Choices(com.example.findme.places.AutoPlaces.RADIUS_CHOICES, radius, { radius = it }) { "${it.toInt()} m" }
         (com.example.findme.places.AutoPlaces.validateLabel(label) ?: state.error?.takeIf { submitted })?.let { FormProblem(it) }
         val ready = com.example.findme.places.AutoPlaces.validateLabel(label) == null && (!byAddress || chosen != null)
-        Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null) },
+        Text("Actividades en este lugar", style = MaterialTheme.typography.titleSmall)
+        Choices(listOf<String?>(null) + com.example.findme.places.AutoPlaces.CATEGORIES, category, { category = it; categoryTouched = true }) { key ->
+            key?.let { com.example.findme.data.model.ActivityCategory.fromKey(it).label } ?: "Ninguna"
+        }
+        Text("Tus actividades presenciales de esa categoría cuentan como asistidas cuando estás aquí.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { submitted = true; actions.addAutoPlace(label, radius, if (byAddress) chosen else null, category) },
             enabled = !state.busy && ready, modifier = Modifier.fillMaxWidth()) {
             Text(if (state.busy) (if (byAddress) "Guardando…" else "Buscando tu ubicación…") else "Guardar lugar")
+        }
+    }
+}
+
+/**
+ * Attendance to your university and work activities. In-person ones with a saved place of their category
+ * count by themselves; any date can also be marked by hand. Only you can see it.
+ */
+@Composable
+private fun AttendancePanel(state: AccountState, actions: AccountActions) {
+    val enabled = state.settings.attendance
+    LaunchedEffect(enabled) { if (enabled) actions.refreshAttendance() }
+    Panel {
+        SectionHeading(Icons.Default.FactCheck, "Asistencia",
+            "Cuenta a qué clases y turnos fuiste. Solo tú la ves.")
+        AccountSettingsSwitch("Registrar mi asistencia",
+            "Las actividades presenciales cuentan como asistidas si estás en un lugar de su categoría desde 15 min antes. " +
+                "Al salir antes de tiempo te preguntamos si terminó.", enabled) { actions.setAttendance(it) }
+        if (!enabled) return@Panel
+        if (state.autoPlaces.none { it.activityCategory != null }) Text(
+            "Ningún lugar tiene actividades: indica en «Estado automático por lugar» cuál es tu universidad o tu trabajo, " +
+                "o marca la asistencia a mano.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        val zone = state.profile?.zone() ?: ZoneId.systemDefault()
+        val now = profileClock(zone)
+        val since = state.settings.attendanceSince?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: now.toLocalDate()
+        val summaries = remember(state.schedules, state.autoPlaces, state.attendance, since, now.toLocalDate(), now.hour) {
+            com.example.findme.attendance.Attendance.summaries(state.schedules, state.autoPlaces, state.attendance, since, now)
+        }
+        if (summaries.isEmpty()) Text("Aún no terminó ninguna clase o turno desde el ${since.longDate()}.",
+            color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+        summaries.forEach { summary -> AttendanceRow(summary, state, actions) }
+    }
+}
+
+@Composable
+private fun AttendanceRow(summary: com.example.findme.attendance.Attendance.Summary, state: AccountState, actions: AccountActions) {
+    var open by rememberSaveable(summary.schedule.id) { mutableStateOf(false) }
+    HorizontalDivider(color = CardBorder)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { open = !open }.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(summary.schedule.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(
+                "${summary.attended} asistidas", "${summary.missed} faltas",
+                summary.days.count { it.mark == com.example.findme.attendance.Attendance.Mark.Unmarked }.takeIf { it > 0 }?.let { "$it sin marcar" },
+                if (summary.automatic) null else "a mano"
+            ).joinToString(" · "), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Text(summary.rate?.let { "$it %" } ?: "—", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            color = when { summary.rate == null -> TextMuted; summary.rate!! >= 80 -> StatusGreenText; else -> MaterialTheme.colorScheme.error })
+        Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = TextMuted)
+    }
+    if (open) summary.days.take(10).forEach { day ->
+        val date = day.occurrence.originalDate.toString()
+        Column(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(day.occurrence.window.start.toLocalDate().longDate() +
+                if (day.manual) " · marcada a mano" else "", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceChip("Asistí", day.mark == com.example.findme.attendance.Attendance.Mark.Attended, onClick = {
+                    if (!state.busy) actions.markAttendance(summary.schedule.id, date, true)
+                })
+                ChoiceChip("Falté", day.mark == com.example.findme.attendance.Attendance.Mark.Missed, onClick = {
+                    if (!state.busy) actions.markAttendance(summary.schedule.id, date, false)
+                })
+                if (day.manual) TextButton(onClick = { actions.markAttendance(summary.schedule.id, date, null) }, enabled = !state.busy) {
+                    Text("Quitar")
+                }
+            }
         }
     }
 }
