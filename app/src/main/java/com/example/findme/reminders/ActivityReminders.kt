@@ -69,16 +69,25 @@ object ActivityReminders {
         val own = data.schedules.filter { it.userId == data.owner }
         val next = next(own, zone, ZonedDateTime.now(zone), settings.reminderMinutes) ?: return
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val at = next.remindAt.toInstant().toEpochMilli()
+        scheduleAlarm(context, alarms, next.remindAt.toInstant().toEpochMilli(), intent(context), clock = false)
+    }
+
+    /**
+     * Exact when Android allows it, otherwise as close as Doze permits. A [clock] alarm is a user-visible
+     * alarm clock: Android shows it in the status bar and never delays it.
+     */
+    internal fun scheduleAlarm(context: Context, alarms: AlarmManager, at: Long, operation: PendingIntent, clock: Boolean) {
         if (exactAllowed(context)) {
             try {
-                alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(context))
+                if (clock) alarms.setAlarmClock(AlarmManager.AlarmClockInfo(at,
+                    NotificationHelper.openSchedule(context)), operation)
+                else alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation)
                 return
             } catch (_: SecurityException) {
                 // Android may revoke exact alarm access between the check and scheduling.
             }
         }
-        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent(context))
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation)
     }
 
     /** Fired by the alarm: shows the reminder that is due now, if it still is, then schedules the next. */

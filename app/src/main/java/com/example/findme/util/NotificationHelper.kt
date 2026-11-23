@@ -19,7 +19,8 @@ object NotificationHelper {
         Statuses("findme_status_channel", "Estados de tu gente", "Cuando tu gente comparte, cambia o quita su estado."),
         Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos que recibes."),
         Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario."),
-        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a un plan que propusiste.")
+        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a un plan que propusiste."),
+        Alarms("near_alarms", "Alarmas de tus actividades", "La alarma que suena antes de una actividad cuando eliges el modo alarma.")
     }
 
     fun createNotificationChannel(context: Context) {
@@ -27,7 +28,11 @@ object NotificationHelper {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         Channel.entries.forEach { channel ->
             manager.createNotificationChannel(NotificationChannel(channel.id, channel.title, NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = channel.description })
+                .apply {
+                    description = channel.description
+                    // The alarm service plays the chosen sound and vibration itself, on the alarm stream.
+                    if (channel == Channel.Alarms) { setSound(null, null); enableVibration(false) }
+                })
         }
     }
 
@@ -35,6 +40,9 @@ object NotificationHelper {
         val intent = Intent(context, com.example.findme.MainActivity::class.java).apply { this.action = action }
         return PendingIntent.getActivity(context, action.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
+
+    /** Opens Near on your schedule, e.g. from the alarm icon in the status bar. */
+    fun openSchedule(context: Context): PendingIntent = open(context, OPEN_SCHEDULE)
 
     /** Status and activity changes of one person replace each other instead of piling up. */
     fun personId(personId: String) = "person:$personId".hashCode()
