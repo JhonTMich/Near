@@ -25,6 +25,13 @@ interface AccountActions {
     fun setTheme(theme: AppTheme) {}
     fun setReminders(enabled: Boolean) {}
     fun setReminderMinutes(minutes: Int) {}
+    fun setReminderAlarm(enabled: Boolean) {}
+    /** A system sound picked with Android's sound picker; null goes back to the default alarm. */
+    fun setAlarmSound(uri: String?) {}
+    fun setAlarmVibrate(enabled: Boolean) {}
+    fun setAlarmSnoozeMinutes(minutes: Int) {}
+    /** Rings the alarm now with the chosen sound, so the person can hear it before relying on it. */
+    fun testAlarm() {}
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}
     fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) {}
     fun deleteSchedule(id: String) {}
