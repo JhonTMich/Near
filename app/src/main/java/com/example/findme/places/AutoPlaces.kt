@@ -272,7 +272,7 @@ object AutoPlaces {
     }
 
     /** The saved places the phone is in now, kept from the enter and exit transitions. */
-    private suspend fun inside(context: Context, owner: String): Set<String> =
+    internal suspend fun inside(context: Context, owner: String): Set<String> =
         context.dataStore.data.first()[insideKey(owner)]?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
 
     private suspend fun setInside(context: Context, owner: String, ids: Set<String>) {
@@ -344,6 +344,8 @@ object AutoPlaces {
             else -> streetChange(context, owner, inside, situation).takeUnless { it == Change.Nothing }
                 ?: decide(false, place, situation.marker, situation.manualStatus)
         }
+        // Arriving at a place may be arriving at an activity; this only reads the cache and enqueues the mark.
+        if (entering) runCatching { com.example.findme.attendance.AttendanceTracker.check(context) }
         if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
     }
 
