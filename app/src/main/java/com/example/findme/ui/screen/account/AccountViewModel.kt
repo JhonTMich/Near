@@ -61,6 +61,7 @@ data class AccountState(
     val connections: List<PersonConnection> = emptyList(),
     val profiles: List<AccountProfile> = emptyList(),
     val selectedPerson: AccountProfile? = null,
+    val scheduleFollowRequests: List<com.example.findme.data.model.ScheduleFollowRequest>? = null,
     val personSchedules: List<ScheduleDto> = emptyList(),
     val incomingVisibility: Map<String, ConnectionVisibility> = emptyMap(),
     val peopleSchedulesFresh: Boolean = false,
@@ -176,6 +177,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM004" -> "La fecha o las horas de esta actividad no son válidas. Revisa la ocurrencia."
                     "FM003" -> "La zona horaria del teléfono no es válida. Revisa la configuración de fecha y hora."
                     "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
+                    "FM006" -> "El contacto dejó de compartir su horario. La sincronización sigue activa. Puedes cerrarla sin guardar una copia."
+                    "FM007" -> "La conexión terminó. Ya no se puede aceptar el plan."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
@@ -273,6 +276,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val messagesRequest = async { readSection("quick messages", repository::quickMessages) }
             val signalsRequest = async { readSection("inbox", repository::receivedSignals) }
             val schedulesRequest = async { readSection("schedules", repository::accessibleSchedules) }
+            val followsRequest = async { readSection("schedule follows", repository::scheduleFollowRequests) }
             val statusesRequest = async { readSection("statuses", repository::accessibleStatuses) }
             val visibilityRequest = async { readSection("incoming visibility", repository::incomingConnectionVisibility) }
             val preferencesRequest = async { readSection("connection preferences", repository::connectionPreferences) }
@@ -288,6 +292,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val remoteMessages = messagesRequest.await()
             val remoteSignals = signalsRequest.await()
             val remoteSchedules = schedulesRequest.await()
+            val remoteFollows = followsRequest.await()
             val remoteStatuses = statusesRequest.await()
             val remotePreferences = preferencesRequest.await()
             val remoteVisibility = visibilityRequest.await()
@@ -338,6 +343,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 schedules = ownSchedules, statuses = statuses.filter { it.userId == id },
                 connections = connections, profiles = profiles, messages = messages, signals = signals,
                 preferences = preferences, pauses = pauses, selectedPerson = selected,
+                scheduleFollowRequests = remoteFollows,
                 freeAlerts = (remoteFreeAlerts ?: previous?.freeAlerts.orEmpty()).filter { it.targetId in peopleIds },
                 plans = (remotePlans ?: previous?.plans.orEmpty()).filter { it.senderId in peopleIds || it.recipientId in peopleIds },
                 groups = remoteGroups ?: previous?.groups.orEmpty(),
@@ -500,6 +506,33 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.reminders.ActivityReminders.reschedule(getApplication())
         }
     }
+    override fun setReminderAlarm(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            preferences.setReminderAlarm(id, enabled)
+            // An alarm is scheduled as a visible alarm clock, a notification as a plain exact alarm.
+            com.example.findme.reminders.ActivityReminders.reschedule(getApplication())
+            if (!enabled) com.example.findme.reminders.ReminderAlarm.cancel(getApplication())
+        }
+    }
+    override fun setAlarmSound(uri: String?) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmSound(id, uri) }
+    }
+    override fun setAlarmVibrate(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmVibrate(id, enabled) }
+    }
+    override fun setAlarmSnoozeMinutes(minutes: Int) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch { preferences.setAlarmSnoozeMinutes(id, minutes) }
+    }
+    override fun testAlarm() {
+        val app = getApplication<android.app.Application>()
+        val ringing = com.example.findme.reminders.ReminderAlarm.Ringing.of("test", "Así sonará tu alarma",
+            "Prueba de los recordatorios de Near", startsAt = 0L, settings = _state.value.settings)
+        com.example.findme.reminders.ReminderAlarm.ring(app, ringing)
+    }
 
     override fun refresh() = perform(quiet = true, failure = LOAD_FAILED) { load() }
     override fun register(name: String, email: String, username: String, password: String, confirmation: String) = perform {
@@ -551,7 +584,16 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             val ownerId = repository.userId()
             scheduleSync.beginWrite()
             try {
-                val rows = repository.saveSchedules(activities.map { it.copy(userId = ownerId) }).withPauses(_state.value.pauses)
+                val followed = currentSchedules.singleOrNull { it.id == activities.first().id && it.sourceId != null }
+                val saved = if (followed == null) {
+                    repository.saveSchedules(activities.map { it.copy(userId = ownerId) })
+                } else {
+                    require(activities.size == 1) { "Edita una sola actividad sincronizada a la vez." }
+                    val activity = activities.single()
+                    require(activity.oneOffDate == followed.oneOffDate) { "Usa el cambio por fecha para reprogramar esta actividad." }
+                    listOf(repository.customizeFollowedActivity(activity, requireNotNull(followed.sourceId)))
+                }
+                val rows = saved.withPauses(_state.value.pauses)
                 if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
 
                 val ids = rows.map { it.id }.toSet()
@@ -605,7 +647,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {
-            val updated = listOf(repository.changeScheduleOccurrence(id, originalDate, change)).withPauses(_state.value.pauses).single()
+            val followed = _state.value.schedules.any { it.id == id && it.sourceId != null }
+            val activity = if (followed) repository.changeFollowedOccurrence(id, originalDate, change)
+                else repository.changeScheduleOccurrence(id, originalDate, change)
+            val updated = listOf(activity).withPauses(_state.value.pauses).single()
             if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
             allSchedules = allSchedules.map { if (it.id == id) updated else it }
             _state.update { old -> old.copy(
@@ -744,7 +789,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {
-            repository.deleteSchedule(id)
+            if (_state.value.schedules.any { it.id == id && it.sourceId != null }) {
+                repository.deleteFollowedActivity(id)
+            } else {
+                repository.deleteSchedule(id)
+            }
             if (repository.auth.currentUserOrNull()?.id != ownerId) return@perform
             allSchedules = allSchedules.filterNot { it.id == id }
             _state.update { old -> old.copy(
@@ -805,6 +854,27 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val owner = repository.userId()
         val result = repository.sharedSchedulesForAvailability(contactId)
         return result.takeIf { repository.auth.currentUserOrNull()?.id == owner }
+    }
+
+    override fun requestScheduleFollow(leaderId: String) = perform {
+        repository.requestScheduleFollow(leaderId)
+        refreshAfterSave("Solicitud enviada.")
+    }
+
+    override fun approveScheduleFollow(id: String) = perform {
+        repository.approveScheduleFollow(id)
+        refreshAfterSave("Solicitud aceptada.")
+    }
+
+    override fun endScheduleFollow(id: String, keepAll: Boolean?) = perform {
+        if (keepAll == null) repository.endScheduleFollow(id)
+        else repository.detachScheduleFollow(id, keepAll)
+        refreshAfterSave("Sincronización finalizada.")
+    }
+
+    override fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) = perform {
+        repository.selectFollowedActivity(requestId, sourceId, selected)
+        refreshAfterSave()
     }
 
     override fun selectPerson(profile: AccountProfile) = perform {

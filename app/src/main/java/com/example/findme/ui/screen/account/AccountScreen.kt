@@ -708,6 +708,17 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                         Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            schedule.sourceOwnerId?.let { sourceOwner ->
+                                val sourceName = state.profiles.firstOrNull { it.id == sourceOwner }?.displayName
+                                Text(
+                                    if (sourceName == null) "Horario sincronizado" else "Horario de $sourceName",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                                if (schedule.followedCustomized) {
+                                    Text("Con ajustes personales", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                }
+                            }
                             Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                         }
                         var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
@@ -725,7 +736,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     editing = recurring
                                     showEditor = true
                                 })
-                                DropdownMenuItem(text = { Text(if (recurring.isOneOff) "Eliminar" else "Eliminar serie") },
+                                DropdownMenuItem(text = { Text(when {
+                                    recurring.sourceId != null -> "Dejar de seguir esta actividad"
+                                    recurring.isOneOff -> "Eliminar"
+                                    else -> "Eliminar serie"
+                                }) },
                                     onClick = { menuOpen = false; pendingDelete = recurring })
                             }
                         }
@@ -742,6 +757,10 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     exceptions.forEach { (schedule, exception) ->
         Panel {
             Text(schedule.title, fontWeight = FontWeight.Bold)
+            val source = state.profiles.firstOrNull { it.id == schedule.sourceOwnerId }
+            if (source != null) {
+                Text("Horario de ${source.displayName}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
             StatusPill(if (exception.cancelled) "Cancelada" else "Reprogramada",
                 if (exception.cancelled) MaterialTheme.colorScheme.error else BrandSky)
             exception.date?.takeUnless { exception.cancelled }?.let {
@@ -767,7 +786,9 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
     pendingDelete?.let { schedule ->
-        if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
+        if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
+            { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
+        else if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else Confirm("¿Eliminar la serie de ${schedule.title}?", "Se eliminarán todas las repeticiones y sus cambios puntuales.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
@@ -1077,6 +1098,7 @@ private fun ScheduleEditor(existing: ScheduleDto?, initialDay: Int, initialDate:
         Field(title, { title = it.take(120) }, "Título", placeholder = if (once) "Ej. Cita médica" else "Ej. Clase de inglés")
         if (editingId == null) Choices(listOf(false, true), once, { once = it }) { if (it) "Una sola fecha" else "Cada semana" }
         when {
+            once && existing?.sourceId != null -> Text(onceDate.longDate(), style = MaterialTheme.typography.bodyMedium)
             once -> SelectField("Fecha", onceDate.longDate().replaceFirstChar(Char::titlecase), onClick = { pickingDate = true },
                 expanded = pickingDate, trailing = Icons.Default.Event)
             editingId == null -> ScheduleDays(selectedDays, { selectedDays = it })
@@ -1291,6 +1313,16 @@ private fun People(state: AccountState, actions: AccountActions) {
     val people = state.connections.mapNotNull { connection ->
         state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
     }.sortedBy { controls.nameOf(it).lowercase() }
+    val pendingFollowers = state.scheduleFollowRequests.orEmpty()
+        .filter { it.leaderId == state.profile?.id && !it.approved }
+        .map { it.followerId }.toSet()
+    people.filter { it.id in pendingFollowers }.forEach { requester ->
+        OutlinedButton(
+            onClick = { selectedGroup = null; actions.selectPerson(requester) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Solicitud de horario de ${controls.nameOf(requester)}") }
+    }
     if (state.connections.isEmpty()) {
         EmptyPanel(Icons.Default.PeopleOutline, "Lo cotidiano se comparte", "Conecta con una persona para ver sus estados y horarios. Tú decides con quién.")
     } else {
@@ -1413,6 +1445,7 @@ private fun People(state: AccountState, actions: AccountActions) {
                 TextButton(onClick = { sendMessage = false; manageMessages = true }) { Text("Editar mensajes rápidos") }
             }
         }
+        ScheduleFollowPanel(person, state, actions, visibility?.sharesSchedule == true)
         SectionHeading(Icons.Default.CalendarMonth, "Su semana")
         when {
             visibility?.sharesSchedule == false -> Panel {
@@ -1454,6 +1487,103 @@ private fun People(state: AccountState, actions: AccountActions) {
 }
 
 /** What everyone in a group is doing now, and a message for all of them. */
+@Composable
+private fun ScheduleFollowPanel(person: AccountProfile, state: AccountState, actions: AccountActions, sharesSchedule: Boolean) {
+    val requests = state.scheduleFollowRequests ?: return
+    val owner = state.profile?.id ?: return
+    val outgoing = requests.firstOrNull { it.followerId == owner }
+    val incoming = requests.firstOrNull { it.followerId == person.id && it.leaderId == owner }
+    var showActivities by rememberSaveable(person.id) { mutableStateOf(false) }
+    var showDetach by rememberSaveable(person.id) { mutableStateOf(false) }
+
+    if (incoming != null) Panel {
+        if (incoming.approved) {
+            Text("${person.displayName} sigue tu horario")
+            TextButton(onClick = { actions.endScheduleFollow(incoming.id, null) }, enabled = !state.busy) {
+                Text("Detener sincronización")
+            }
+        } else {
+            Text("${person.displayName} quiere seguir tu horario")
+            Button(onClick = { actions.approveScheduleFollow(incoming.id) }, enabled = !state.busy) {
+                Text("Aceptar solicitud")
+            }
+            TextButton(onClick = { actions.endScheduleFollow(incoming.id, null) }, enabled = !state.busy) {
+                Text("Rechazar")
+            }
+        }
+    }
+
+    when {
+        outgoing?.leaderId == person.id && outgoing.approved -> Panel {
+            Text("Horario de ${person.displayName}")
+            Button(onClick = { showActivities = true }, enabled = !state.busy && sharesSchedule) {
+                Text("Elegir actividades")
+            }
+            TextButton(onClick = { showDetach = true }, enabled = !state.busy) {
+                Text("Desincronizar horario")
+            }
+        }
+        outgoing?.leaderId == person.id -> Panel {
+            Text("Solicitud pendiente de aceptación")
+            TextButton(onClick = { actions.endScheduleFollow(outgoing.id, null) }, enabled = !state.busy) {
+                Text("Cancelar solicitud")
+            }
+        }
+        outgoing == null && sharesSchedule -> OutlinedButton(
+            onClick = { actions.requestScheduleFollow(person.id) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Solicitar sincronización de horario") }
+    }
+
+    if (showActivities && outgoing?.approved == true && outgoing.leaderId == person.id && sharesSchedule) {
+        Sheet({ showActivities = false }, "Actividades de ${person.displayName}", "Elige cuáles quieres ver en tu horario.") {
+            val chosen = state.schedules.mapNotNull { it.sourceId }.toSet()
+            val choices = state.personSchedules.filter { it.sourceId == null }
+                .sortedWith(compareBy({ it.dayOfWeek }, { it.startTime }))
+            if (choices.isEmpty()) Text("No hay actividades para sincronizar.")
+            choices.forEach { activity ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = activity.id in chosen,
+                        onCheckedChange = { actions.selectFollowedActivity(outgoing.id, activity.id, it) },
+                        enabled = !state.busy
+                    )
+                    Column {
+                        Text(activity.title)
+                        Text(
+                            "${activity.oneOffDate ?: days[activity.dayOfWeek - 1]} · ${activity.startTime.take(5)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+
+    if (showDetach && outgoing?.approved == true && outgoing.leaderId == person.id) {
+        val description = if (sharesSchedule) "Tus actividades propias y las que personalizaste se conservarán."
+            else "El horario de origen ya no está disponible para guardar una copia. Tus actividades propias se conservarán."
+        Sheet({ showDetach = false }, "Desincronizar horario", description) {
+            if (sharesSchedule) {
+                Button(onClick = { actions.endScheduleFollow(outgoing.id, true) }, enabled = !state.busy) {
+                    Text("Conservar copia de las actividades")
+                }
+                OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, false) }, enabled = !state.busy) {
+                    Text("Quitar las actividades sin editar")
+                }
+            } else {
+                OutlinedButton(onClick = { actions.endScheduleFollow(outgoing.id, null) }, enabled = !state.busy) {
+                    Text("Desincronizar sin guardar copia")
+                }
+            }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
 @Composable
 private fun GroupPanel(group: PersonGroup, state: AccountState, actions: AccountActions, onEdit: () -> Unit) {
     var sending by rememberSaveable(group.id) { mutableStateOf(false) }
@@ -1707,10 +1837,15 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
     var notificationsAllowed by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     var silencedChannels by remember { mutableStateOf(blockedChannels()) }
     var exact by remember { mutableStateOf(com.example.findme.reminders.ActivityReminders.exactAllowed(context)) }
+    // Android 14+ asks the person before an app may open a full screen over the lock screen.
+    fun fullScreenAllowed() = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+        notificationManager?.canUseFullScreenIntent() != false
+    var fullScreen by remember { mutableStateOf(fullScreenAllowed()) }
     androidx.lifecycle.compose.LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
         silencedChannels = blockedChannels()
         exact = com.example.findme.reminders.ActivityReminders.exactAllowed(context)
+        fullScreen = fullScreenAllowed()
     }
     val nearAlerts = with(state.settings) { activities || statuses || messages || reminders }
     var accountSheet by remember { mutableStateOf<AccountSheet?>(null) }
@@ -1752,11 +1887,18 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
                 if (minutes >= 60) "${minutes / 60} h antes" else "$minutes min antes"
             }
             if (!exact && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                Text("Android puede retrasar el recordatorio unos minutos. Permite las alarmas exactas para que llegue a tiempo.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                Text(if (state.settings.reminderAlarm)
+                    "Sin alarmas exactas, Android puede retrasar la alarma o dejarla solo como notificación. Permítelas para que suene a tiempo."
+                    else "Android puede retrasar el recordatorio unos minutos. Permite las alarmas exactas para que llegue a tiempo.",
+                    color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 SettingsRow(Icons.Default.Alarm, "Permitir alarmas exactas") {
                     context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${context.packageName}")))
                 }
             }
+            HorizontalDivider(color = CardBorder)
+            AccountSettingsSwitch("Sonar como alarma", "Suena con un sonido de alarma y ocupa la pantalla hasta que la detengas o la pospongas.",
+                state.settings.reminderAlarm) { actions.setReminderAlarm(it) }
+            if (state.settings.reminderAlarm) ReminderAlarmSettings(state, actions, fullScreen)
         }
     }
     AutoPlacesPanel(state, actions)
@@ -1824,6 +1966,47 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
 }
 
 private enum class AccountSheet { Profile, Password, Delete }
+
+/** Sound, vibration and snooze of the alarm mode. The sounds are the phone's own, chosen with Android's picker. */
+@Composable
+private fun ReminderAlarmSettings(state: AccountState, actions: AccountActions, fullScreen: Boolean) {
+    val context = LocalContext.current
+    val sound = state.settings.alarmSound
+    val soundTitle = remember(sound) { com.example.findme.reminders.ReminderAlarm.soundTitle(context, sound) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val picked = result.data?.let { androidx.core.content.IntentCompat.getParcelableExtra(it,
+            android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI, android.net.Uri::class.java) }
+        // "Predeterminado" follows whatever alarm sound the phone uses, also if it changes later.
+        actions.setAlarmSound(picked?.takeIf { it != Settings.System.DEFAULT_ALARM_ALERT_URI }?.toString())
+    }
+    SettingsRow(Icons.Default.MusicNote, "Sonido: $soundTitle") {
+        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "Sonido de la alarma")
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, Settings.System.DEFAULT_ALARM_ALERT_URI)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                sound?.let(android.net.Uri::parse) ?: Settings.System.DEFAULT_ALARM_ALERT_URI)
+        try { picker.launch(intent) } catch (_: android.content.ActivityNotFoundException) { }
+    }
+    AccountSettingsSwitch("Vibrar", "", state.settings.alarmVibrate) { actions.setAlarmVibrate(it) }
+    Text("Posponer", style = MaterialTheme.typography.titleSmall)
+    Choices(com.example.findme.data.local.ALARM_SNOOZE_CHOICES, state.settings.alarmSnoozeMinutes, actions::setAlarmSnoozeMinutes) { "$it min" }
+    if (!fullScreen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        Text("Android no deja que la alarma se muestre sobre la pantalla bloqueada; sonará, pero solo verás la notificación.",
+            color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        SettingsRow(Icons.Default.Fullscreen, "Permitir pantalla completa") {
+            try {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    android.net.Uri.parse("package:${context.packageName}")))
+            } catch (_: android.content.ActivityNotFoundException) { }
+        }
+    }
+    SettingsRow(Icons.Default.PlayArrow, "Probar la alarma", chevron = false) { actions.testAlarm() }
+}
 
 /**
  * Automatic status by place. The places are saved only on this phone; the only thing shared is the label,

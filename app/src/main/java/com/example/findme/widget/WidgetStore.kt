@@ -49,6 +49,7 @@ object WidgetStore {
         context.dataStore.edit { it.remove(cacheKey); it.remove(errorKey) }
         androidx.work.WorkManager.getInstance(context).cancelUniqueWork("WidgetStatusBoundary")
         com.example.findme.reminders.ActivityReminders.cancel(context)
+        com.example.findme.reminders.ReminderAlarm.cancel(context)
         NearWidgets.updateAll(context)
     }
 

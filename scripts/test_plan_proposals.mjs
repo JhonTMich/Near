@@ -73,5 +73,15 @@ try {
   await t.as(a);
   await propose(c, 'Silenciado');
   check((await t.sent()).filter((call) => call.type === 'plan').length === 0, 'A silenced sender does not notify');
+  await t.as(a);
+  const [{ id: disconnected }] = (await propose(b, 'Conexión terminada')).rows;
+  await db.exec(`delete from public.person_connections where person_a = '${a}' and person_b = '${b}'`);
+  check((await rows(`select status from public.plan_proposals where id = '${disconnected}'`))[0].status === 'cancelled',
+    'Disconnect revokes pending proposals');
+  await t.as(b);
+  await t.rejects(db.query(`select * from public.answer_plan('${disconnected}', true)`), 'FM007',
+    'A disconnected recipient cannot add a pending plan to either schedule');
+  check((await rows(`select count(*)::int n from public.personal_schedule where user_id = '${b}'`))[0].n === 0,
+    'No activity is created upon accepting after disconnecting');
   console.log(`Plan proposals: ${t.checks} checks passed.`);
 } finally { await db.close(); }
