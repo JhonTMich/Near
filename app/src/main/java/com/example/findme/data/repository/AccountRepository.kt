@@ -221,6 +221,25 @@ class AccountRepository {
             }
         }).decodeSingle<ScheduleDto>()
 
+    /** Your own attendance from [since] ("yyyy-MM-dd"); nobody else's is readable. */
+    suspend fun attendance(since: String) = client.postgrest["activity_attendance"].select {
+        filter { gte("occurrence_date", since) }
+    }.decodeList<ActivityAttendance>()
+
+    /** Null when an automatic mark found one set by hand, which it never replaces. */
+    suspend fun recordAttendance(scheduleId: String, date: String, status: String, source: String): ActivityAttendance? =
+        client.postgrest.rpc("record_attendance", buildJsonObject {
+            put("activity_id", scheduleId)
+            put("on_date", date)
+            put("mark", status)
+            put("origin", source)
+        }).decodeList<ActivityAttendance>().firstOrNull()
+
+    /** Removes the mark of one date, so it goes back to how the app counts it by itself. */
+    suspend fun clearAttendance(scheduleId: String, date: String) {
+        client.postgrest["activity_attendance"].delete { filter { eq("schedule_id", scheduleId); eq("occurrence_date", date) } }
+    }
+
     /** Own pauses and those of people who share their schedule; RLS decides. */
     suspend fun pauses() = client.postgrest["schedule_pauses"].select().decodeList<SchedulePause>()
 

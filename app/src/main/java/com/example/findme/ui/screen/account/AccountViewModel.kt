@@ -10,6 +10,7 @@ import com.example.findme.domain.model.validateSchedule
 import com.example.findme.domain.model.conflictMessage
 import com.example.findme.domain.model.findScheduleConflict
 import com.example.findme.domain.model.withPauses
+import com.example.findme.domain.model.occurrencesOn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.example.findme.data.local.*
@@ -74,6 +76,8 @@ data class AccountState(
     /** Own pauses and those of people who share their schedule. Already applied to the schedules above. */
     val pauses: List<SchedulePause> = emptyList(),
     /** People this account asked to be told about when they are free. */
+    /** Your own attendance marks, loaded while attendance is on. */
+    val attendance: List<ActivityAttendance> = emptyList(),
     val freeAlerts: List<FreeAlert> = emptyList(),
     /** Plans sent or received by this account. */
     val plans: List<PlanProposal> = emptyList(),
@@ -643,7 +647,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         snapshotMutex.withLock { saveCurrentCache() }
         publishWidgetSnapshot()
     }
-    override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) = perform {
+    override fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) =
+        changeOccurrence(draftId, id, originalDate, change, null)
+
+    override fun endActivityNow(id: String, originalDate: String) {
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        val now = java.time.ZonedDateTime.now(zone)
+        val occurrence = _state.value.schedules.occurrencesOn(now.toLocalDate(), zone)
+            .firstOrNull { it.schedule.id == id && it.originalDate.toString() == originalDate } ?: return
+        val change = com.example.findme.domain.model.EndEarly.change(occurrence, now) ?: return
+        changeOccurrence(java.util.UUID.randomUUID().toString(), id, originalDate, change,
+            "Actividad terminada por hoy. Puedes restaurarla desde «Solo esta fecha».")
+    }
+
+    private fun changeOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?, notice: String?) = perform {
         val ownerId = repository.userId()
         scheduleSync.beginWrite()
         try {
@@ -758,16 +775,61 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             com.example.findme.places.AutoPlaces.register(getApplication(), null)
         }
     }
-    override fun addAutoPlace(label: String) = perform {
+    override fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?, category: String?) = perform {
         com.example.findme.places.AutoPlaces.validateLabel(label)?.let { throw IllegalArgumentException(it) }
         val owner = repository.userId()
-        val location = com.example.findme.places.AutoPlaces.currentLocation(getApplication())
+        val (latitude, longitude) = at?.let { it.latitude to it.longitude }
+            ?: com.example.findme.places.AutoPlaces.currentLocation(getApplication())?.let { it.latitude to it.longitude }
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
-        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, location)
+        val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address, category)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+    }
+    override suspend fun searchAddress(query: String) =
+        runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
+    override fun setAttendance(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        val zone = runCatching { ZoneId.of(_state.value.profile?.timezone) }.getOrDefault(ZoneId.systemDefault())
+        viewModelScope.launch {
+            preferences.setAttendance(id, enabled, java.time.LocalDate.now(zone).toString())
+            if (enabled) {
+                runCatching { com.example.findme.attendance.AttendanceTracker.check(getApplication()) }
+                refreshAttendance()
+            } else {
+                com.example.findme.attendance.AttendanceCheckWorker.cancel(getApplication())
+                _state.update { it.copy(attendance = emptyList()) }
+            }
+        }
+    }
+    override fun refreshAttendance() {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            val settings = preferences.settings(id).first()
+            val since = settings.attendanceSince?.takeIf { settings.attendance } ?: return@launch
+            val records = readSection("attendance") { repository.attendance(since) } ?: return@launch
+            if (repository.auth.currentUserOrNull()?.id == id) _state.update { it.copy(attendance = records) }
+        }
+    }
+    override fun markAttendance(scheduleId: String, date: String, present: Boolean?) = perform {
+        val id = repository.userId()
+        val saved = if (present == null) { repository.clearAttendance(scheduleId, date); null }
+            else repository.recordAttendance(scheduleId, date,
+                if (present) ActivityAttendance.PRESENT else ActivityAttendance.ABSENT, ActivityAttendance.MANUAL)
+        if (repository.auth.currentUserOrNull()?.id != id) return@perform
+        _state.update { old -> old.copy(attendance = old.attendance
+            .filterNot { it.scheduleId == scheduleId && it.occurrenceDate == date } + listOfNotNull(saved)) }
+    }
+    override fun setStreetStatus(enabled: Boolean) {
+        val id = repository.auth.currentUserOrNull()?.id ?: return
+        viewModelScope.launch {
+            preferences.setStreetStatus(id, enabled)
+            // Turning it on checks where the phone is now; turning it off removes only «En la calle».
+            runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = enabled) }
+        }
     }
     override fun removeAutoPlace(id: String) = perform {
         val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
+        // Without places «En la calle» has no meaning: remove it if it was shared.
+        if (places.isEmpty()) runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication()) }
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
     }
     /** After the location permission changes, so the geofences match what Android now allows. */
@@ -923,7 +985,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val state = _state.value
         val profile = state.profile ?: return null
         return com.example.findme.domain.model.AccountExport.build(profile, state.schedules, state.statuses, state.messages,
-            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses, state.groups, state.groupMembers)
+            state.connections, state.profiles, state.signals, Instant.now().toString(), state.pauses, state.groups, state.groupMembers, state.attendance)
     }
     override fun exportFinished(saved: Boolean) {
         _state.update { it.copy(notice = if (saved) "Copia de tus datos guardada." else null,

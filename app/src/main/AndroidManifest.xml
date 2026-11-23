@@ -30,6 +30,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Near">
 
+        <!-- Restricted in Google Cloud to this package, its signing certificates and Maps SDK for Android. -->
+        <meta-data android:name="com.google.android.geo.API_KEY" android:value="${MAPS_API_KEY}" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates"
@@ -102,6 +105,8 @@
             android:excludeFromRecents="true" />
         <!-- Replies typed in a message notification. Only Android delivers the PendingIntent. -->
         <receiver android:name=".push.MessageReplyReceiver" android:exported="false" />
+        <!-- «Terminar ahora» from the notification shown after leaving the place of an activity early. -->
+        <receiver android:name=".attendance.EndEarlyReceiver" android:exported="false" />
         <!-- Enter and exit of the saved places, delivered by Play services. -->
         <receiver android:name=".places.PlaceTransitionReceiver" android:exported="false" />
         <receiver android:name=".reminders.RemindersRescheduleReceiver" android:exported="false">

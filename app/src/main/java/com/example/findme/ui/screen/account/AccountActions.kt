@@ -34,6 +34,8 @@ interface AccountActions {
     fun testAlarm() {}
     fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {}
     fun changeScheduleOccurrence(draftId: String, id: String, originalDate: String, change: ScheduleException?) {}
+    /** Ends the activity in progress at the current minute, only for this date. */
+    fun endActivityNow(id: String, originalDate: String) {}
     fun deleteSchedule(id: String) {}
     fun importSchedules(draftId: String, activities: List<ScheduleDto>) {}
     /** [start] and [end] are inclusive "yyyy-MM-dd" dates in the owner's zone. */
@@ -45,7 +47,21 @@ interface AccountActions {
     fun answerPlan(id: String, accept: Boolean) {}
     fun cancelPlan(id: String) {}
     /** Saves the phone's current location as a place that shares [label] on arrival. */
-    fun addAutoPlace(label: String) {}
+    fun addAutoPlace(label: String) = addAutoPlace(label, com.example.findme.places.AutoPlaces.RADIUS, null,
+        com.example.findme.places.AutoPlaces.suggestedCategory(label))
+    /**
+     * Saves [at] (an address found with [searchAddress]), or the current location when null, as a zone of
+     * [radius] metres that holds your activities of [category] (null for none).
+     */
+    fun addAutoPlace(label: String, radius: Float, at: com.example.findme.places.AutoPlaces.Found?, category: String?) {}
+    suspend fun searchAddress(query: String): List<com.example.findme.places.AutoPlaces.Found> = emptyList()
+    /** Keeps your attendance to university and work activities, counting from today the first time. */
+    fun setAttendance(enabled: Boolean) {}
+    fun refreshAttendance() {}
+    /** Marks one date by hand: attended, missed, or null to go back to how Near counts it by itself. */
+    fun markAttendance(scheduleId: String, date: String, present: Boolean?) {}
+    /** Shares «En la calle» outside every saved place when there is no activity in progress. */
+    fun setStreetStatus(enabled: Boolean) {}
     fun removeAutoPlace(id: String) {}
     fun refreshAutoPlaces() {}
     /** Creates the group when [id] is null, or renames it; its members become exactly [members]. */

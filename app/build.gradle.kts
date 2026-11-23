@@ -33,6 +33,15 @@ val firebaseResources = firebaseConfig?.let { config ->
     }
 }.orEmpty()
 
+// Google Maps key for the zone picker: from the MAPS_API_KEY secret in CI, or from local.properties.
+// Never committed. Without it the app builds the same and the map option is simply hidden.
+val mapsApiKey = (providers.environmentVariable("MAPS_API_KEY").orNull?.takeIf { it.isNotBlank() }
+    ?: providers.fileContents(rootProject.layout.projectDirectory.file("local.properties")).asText.orNull
+        ?.lineSequence()?.map { it.trim() }?.firstOrNull { it.startsWith("MAPS_API_KEY=") }
+        ?.substringAfter("=")?.trim())
+    .orEmpty()
+    .also { require(it.matches(Regex("[A-Za-z0-9_-]*"))) { "MAPS_API_KEY tiene caracteres no válidos" } }
+
 android {
     namespace = "com.example.findme"
     compileSdk = 37
@@ -45,6 +54,8 @@ android {
         versionCode = providers.gradleProperty("releaseVersionCode").orNull?.toInt() ?: 1005000
         versionName = providers.gradleProperty("releaseVersionName").orNull ?: "1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        buildConfigField("boolean", "MAPS_ENABLED", mapsApiKey.isNotEmpty().toString())
     }
 
     buildTypes {
@@ -102,6 +113,8 @@ dependencies {
     implementation(libs.firebase.messaging)
     // Geofences for the automatic status by place (the places never leave the device)
     implementation(libs.play.services.location)
+    // Picking a place's zone on a map; only shown when the build has a Maps API key
+    implementation(libs.maps.compose)
     constraints {
         // Firebase brings an older Fragment transitively; Activity Result requires 1.3 or newer.
         implementation(libs.androidx.fragment)

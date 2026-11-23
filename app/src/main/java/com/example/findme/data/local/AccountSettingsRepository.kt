@@ -26,7 +26,13 @@ data class AccountSettings(
     val alarmSound: String? = null,
     val alarmVibrate: Boolean = true,
     /** How long "Posponer" waits before ringing again: one of [ALARM_SNOOZE_CHOICES]. */
-    val alarmSnoozeMinutes: Int = ALARM_SNOOZE_CHOICES.first()
+    val alarmSnoozeMinutes: Int = ALARM_SNOOZE_CHOICES.first(),
+    /** Shares «En la calle» outside every saved place; off because it tells people when you are out. */
+    val streetStatus: Boolean = false,
+    /** Keeps your attendance to university and work activities; off until the person turns it on. */
+    val attendance: Boolean = false,
+    /** "yyyy-MM-dd" from which attendance counts, so the dates before turning it on are never missed. */
+    val attendanceSince: String? = null
 )
 
 val REMINDER_CHOICES = listOf(10, 30, 60)
@@ -42,6 +48,9 @@ class AccountSettingsRepository(context: Context) {
     private fun alarmSoundKey(id: String) = stringPreferencesKey("account_${id}_alarm_sound")
     private fun alarmVibrateKey(id: String) = booleanPreferencesKey("account_${id}_alarm_vibrate")
     private fun alarmSnoozeKey(id: String) = intPreferencesKey("account_${id}_alarm_snooze")
+    private fun streetKey(id: String) = booleanPreferencesKey("account_${id}_street_status")
+    private fun attendanceKey(id: String) = booleanPreferencesKey("account_${id}_attendance")
+    private fun attendanceSinceKey(id: String) = stringPreferencesKey("account_${id}_attendance_since")
     private fun theme(value: String?) = AppTheme.entries.find { it.name == value } ?: AppTheme.Dark
     val theme = store.data.map { theme(it[themeKey]) }.distinctUntilChanged()
     fun settings(id: String) = store.data.map { prefs -> AccountSettings(
@@ -54,7 +63,10 @@ class AccountSettingsRepository(context: Context) {
         reminderAlarm = prefs[alarmKey(id)] ?: false,
         alarmSound = prefs[alarmSoundKey(id)]?.takeIf { it.isNotBlank() },
         alarmVibrate = prefs[alarmVibrateKey(id)] ?: true,
-        alarmSnoozeMinutes = prefs[alarmSnoozeKey(id)]?.takeIf { it in ALARM_SNOOZE_CHOICES } ?: ALARM_SNOOZE_CHOICES.first()
+        alarmSnoozeMinutes = prefs[alarmSnoozeKey(id)]?.takeIf { it in ALARM_SNOOZE_CHOICES } ?: ALARM_SNOOZE_CHOICES.first(),
+        streetStatus = prefs[streetKey(id)] ?: false,
+        attendance = prefs[attendanceKey(id)] ?: false,
+        attendanceSince = prefs[attendanceSinceKey(id)]
     ) }.distinctUntilChanged()
     suspend fun setAlert(id: String, alert: AccountAlert, enabled: Boolean) {
         store.edit { it[alertKey(id, alert)] = enabled }
@@ -73,6 +85,14 @@ class AccountSettingsRepository(context: Context) {
     suspend fun setAlarmSnoozeMinutes(id: String, minutes: Int) {
         require(minutes in ALARM_SNOOZE_CHOICES)
         store.edit { it[alarmSnoozeKey(id)] = minutes }
+    }
+    suspend fun setStreetStatus(id: String, enabled: Boolean) { store.edit { it[streetKey(id)] = enabled } }
+    /** Turning it on the first time starts counting from [today]; later it keeps the original start. */
+    suspend fun setAttendance(id: String, enabled: Boolean, today: String) {
+        store.edit {
+            it[attendanceKey(id)] = enabled
+            if (enabled && it[attendanceSinceKey(id)] == null) it[attendanceSinceKey(id)] = today
+        }
     }
     suspend fun setTheme(value: AppTheme) { store.edit { it[themeKey] = value.name } }
 }
