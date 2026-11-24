@@ -727,6 +727,36 @@ internal fun freeWindow(busy: List<Pair<ZonedDateTime, ZonedDateTime>>, now: Zon
     }
 }
 
+/**
+ * Someone's day at a glance, from 08:00 to 22:00 in two-hour blocks: rose while busy, green while free,
+ * dimmed once past.
+ */
+@Composable
+private fun DayStrip(schedules: List<ScheduleDto>, zone: ZoneId) {
+    val now = profileClock(zone)
+    val date = now.toLocalDate()
+    val busy = remember(schedules, date, zone) { schedules.occurrencesOn(date, zone).map { it.window } }
+    val free = BrandSky
+    val description = remember(busy, now.hour) {
+        val left = (8 until 22 step 2).count { hour -> date.atTime(hour + 2, 0).atZone(zone).isAfter(now) &&
+            busy.none { it.start.isBefore(date.atTime(hour + 2, 0).atZone(zone)) && it.end.isAfter(date.atTime(hour, 0).atZone(zone)) } }
+        "Hoy le quedan $left bloques libres de dos horas"
+    }
+    Row(Modifier.fillMaxWidth().semantics { contentDescription = description }, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        (8 until 22 step 2).forEach { hour ->
+            val start = date.atTime(hour, 0).atZone(zone)
+            val end = start.plusHours(2)
+            val taken = busy.any { it.start.isBefore(end) && it.end.isAfter(start) }
+            val color = when {
+                !end.isAfter(now) -> CardBorder
+                taken -> BusyInk
+                else -> free
+            }
+            Box(Modifier.weight(1f).height(4.dp).background(color, CircleShape))
+        }
+    }
+}
+
 /** The line of the present moment across the day. */
 @Composable
 private fun NowMarker(now: ZonedDateTime) {
@@ -1464,10 +1494,9 @@ private fun People(state: AccountState, actions: AccountActions) {
     var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
     if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
-    PageHeading("", "Personas", "")
-    state.lastSync?.let { updated ->
-        Text("Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-    }
+    PageHeading("", "Personas", "", trailing = state.lastSync?.let { updated ->
+        "Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}"
+    })
     val people = state.connections.mapNotNull { connection ->
         state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
     }.sortedBy { controls.nameOf(it).lowercase() }
@@ -1492,31 +1521,37 @@ private fun People(state: AccountState, actions: AccountActions) {
             ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
                 leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
-        if (selectedGroup == null) Column {
-            people.forEach { person ->
+        if (selectedGroup == null) NearCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
+            people.forEachIndexed { index, person ->
                 key(person.id) {
+                    val schedules = state.othersSchedules.filter { it.userId == person.id }
                     val status = if (state.selectedPerson?.id == person.id) contactStatus(person, state)
-                    else contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
-                        state.othersStatuses.filter { it.userId == person.id })
+                    else contactStatus(person, state, schedules, state.othersStatuses.filter { it.userId == person.id })
                     val (shown, ink, background) = when (status) {
-                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)
-                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${status.currentSchedule.title}", BusyInk, BusySurface)
-                        is UserCurrentStatus.Override -> Triple(status.customLocation, TextPrimary, AccentContainer)
+                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", FreeInk, FreeSurface)
+                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${ActivityCategory.fromKey(status.currentSchedule.category,
+                            status.currentSchedule.title).label}", BusyInk, BusySurface)
+                        is UserCurrentStatus.Override -> Triple(status.customLocation, MaterialTheme.colorScheme.primary, AccentContainer)
                         is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
                         is UserCurrentStatus.Loading -> Triple("Consultando…", TextSecondary, InnerBg)
                     }
                     val label = listOfNotNull(shown, status.place).joinToString(" · ")
-                    HorizontalDivider(color = CardBorder)
+                    if (index > 0) HorizontalDivider(color = CardBorder)
                     Row(Modifier.fillMaxWidth().selectable(selected = state.selectedPerson?.id == person.id,
                         enabled = !state.busy, role = Role.RadioButton, onClick = { actions.selectPerson(person) })
-                        .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        .padding(start = 16.dp, end = 10.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ProfileAvatar(controls.nameOf(person), Modifier.size(48.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(controls.nameOf(person), style = MaterialTheme.typography.titleMedium)
-                            Surface(color = background, contentColor = ink, shape = CircleShape) {
-                                Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelMedium)
+                        ProfileAvatar(controls.nameOf(person), Modifier.size(44.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(controls.nameOf(person), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Spacer(Modifier.weight(1f))
+                                StateChip(label, ink, background, Modifier.widthIn(max = 180.dp),
+                                    dot = status is UserCurrentStatus.FreeTime || status is UserCurrentStatus.InClass)
+                            }
+                            if (state.incomingVisibility[person.id]?.sharesSchedule == true && state.peopleSchedulesFresh) {
+                                DayStrip(schedules, person.zone())
                             }
                         }
                         if (controls.isMuted(person.id)) Icon(Icons.Default.NotificationsOff, "Avisos silenciados",
@@ -1525,7 +1560,6 @@ private fun People(state: AccountState, actions: AccountActions) {
                     }
                 }
             }
-            HorizontalDivider(color = CardBorder)
         }
     }
     OutlinedButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth()) {
@@ -1555,18 +1589,23 @@ private fun People(state: AccountState, actions: AccountActions) {
             val busy = current is UserCurrentStatus.InClass ||
                 (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
             val watching = state.freeAlerts.any { it.targetId == person.id }
-            Surface(shape = RoundedCornerShape(18.dp), color = FreeSurface, contentColor = StatusGreenText) {
+            Surface(shape = CardShape, color = FreeSurface, contentColor = FreeInk, border = BorderStroke(1.dp, FreeInk.copy(alpha = .18f))) {
                 Row(Modifier.fillMaxWidth().clickable { showAvailability = true }.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.EventAvailable, null)
+                    Box(Modifier.size(38.dp).background(FreeInk.copy(alpha = .12f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center) { Icon(Icons.Default.EventAvailable, null, Modifier.size(19.dp)) }
                     Column(Modifier.weight(1f)) {
-                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium)
+                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text("Ver disponibilidad con ${person.displayName}", style = MaterialTheme.typography.bodySmall)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                 }
             }
-            HeroStatusCard(current) {
+            val personNow = profileClock(person.zone())
+            val upcoming = if (visibility?.sharesSchedule == true && state.peopleSchedulesFresh)
+                state.personSchedules.occurrencesOn(personNow.toLocalDate(), personNow.zone).firstOrNull { it.window.start.isAfter(personNow) }
+                else null
+            HeroStatusCard(current, footer = upcoming?.let { "Próxima actividad: ${it.window.start.format(hourFormat)} · ${it.schedule.title}" }) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2398,11 +2437,11 @@ private fun AttendanceRow(summary: com.example.findme.attendance.Attendance.Summ
 private fun ProfileHeader(profile: AccountProfile, enabled: Boolean, onEdit: () -> Unit) {
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ProfileAvatar(profile.displayName, Modifier.size(64.dp))
+            ProfileAvatar(profile.displayName, Modifier.size(58.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(profile.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                profile.username?.let { Text("@$it", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) }
+                profile.username?.let { Text("@$it", color = TextSecondary, style = MonoLabel) }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.Public, null, Modifier.size(14.dp), tint = TextMuted)
                     Text(profile.timezone, color = TextMuted, style = MaterialTheme.typography.labelSmall)
