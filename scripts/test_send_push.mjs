@@ -96,6 +96,17 @@ test('delivers plans and synchronization requests through FCM even without a run
   }
 });
 
+test('sends cancellation details to the other participant device', async () => {
+  const services = fakeServices({ devices: [{ token: 'device-b', user_id: b }] });
+  const response = await handler(services)(post({ type: 'plan_cancelled', recipients: [b],
+    data: { id: 'plan-1', user_id: a, name: 'Ana', title: 'Vernos', was_accepted: true } }));
+  assert.deepEqual(await response.json(), { sent: 1, removed: 0 });
+  const { message } = JSON.parse(services.calls.find(call => call.url.includes('fcm.googleapis.com')).init.body);
+  assert.equal(message.data.type, 'plan_cancelled');
+  assert.equal(message.data.was_accepted, 'true');
+  assert.equal(message.data.recipient_id, b);
+});
+
 test('does nothing when nobody has a device', async () => {
   const services = fakeServices();
   assert.deepEqual(await (await handler(services)(post({ type: 'activity', recipients: [a] }))).json(), { sent: 0, removed: 0 });

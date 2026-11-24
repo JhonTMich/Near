@@ -68,13 +68,13 @@ object NotificationHelper {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
     }
 
-    fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null) {
+    fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null, alertAgain: Boolean = false) {
         createNotificationChannel(context)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open(context, if (channel == Channel.Reminders) OPEN_SCHEDULE else OPEN_PEOPLE))
-            .setOnlyAlertOnce(true).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(!alertAgain).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(if (channel == Channel.Messages) NotificationCompat.CATEGORY_MESSAGE else if (channel == Channel.Reminders) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             .apply { reply?.let { addAction(replyAction(context, id, it)) } }
             .build()
