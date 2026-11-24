@@ -99,6 +99,7 @@ jobs:
           node scripts/test_one_off_activities.mjs
           node scripts/test_free_alerts.mjs
           node scripts/test_plan_proposals.mjs
+          node scripts/test_plan_cancellation.mjs
           node scripts/test_person_groups.mjs
           node scripts/test_activity_attendance.mjs
           node scripts/test_current_place.mjs
