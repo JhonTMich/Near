@@ -199,7 +199,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
             Column(Modifier.fillMaxSize()
                 .verticalScroll(rememberScrollState()).imePadding()
                 .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                state.error?.let { error -> Panel {
+                state.error?.takeIf { state.signedIn || state.confirmationEmail != null }?.let { error -> Panel {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.error)
                         Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -426,6 +426,7 @@ private fun LoginForm(state: AccountState, actions: AccountActions, viewport: Dp
                 resending -> "Enviar confirmación"; else -> "Entrar" },
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
+        state.error?.let { LoginError(it) }
         if (mode == "login") TextButton(onClick = { mode = "recover"; password = ""; passwordVisible = false }, enabled = !state.busy, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("¿Olvidaste tu contraseña?", color = TextSecondary)
         }
@@ -915,6 +916,8 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     showEditor = true
                                 })
                                 DropdownMenuItem(text = { Text(when {
+                                    Plans.forActivity(state.plans, recurring.id, state.profile?.id.orEmpty())?.let {
+                                        Plans.canCancel(it, state.profile?.id.orEmpty(), Instant.now()) } == true -> "Cancelar plan"
                                     recurring.sourceId != null -> "Dejar de seguir esta actividad"
                                     recurring.isOneOff -> "Eliminar"
                                     else -> "Eliminar serie"
@@ -968,7 +971,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
     pendingDelete?.let { schedule ->
-        if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
+        val owner = state.profile?.id.orEmpty()
+        val sharedPlan = Plans.forActivity(state.plans, schedule.id, owner)
+        if (sharedPlan != null && Plans.canCancel(sharedPlan, owner, Instant.now()))
+            CancelPlanConfirmation(sharedPlan, { pendingDelete = null }, { actions.cancelPlan(sharedPlan.id); pendingDelete = null })
+        else if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
@@ -1873,6 +1880,7 @@ private fun GroupEditor(existing: PersonGroup?, state: AccountState, actions: Ac
 @Composable
 private fun PlansPanel(state: AccountState, actions: AccountActions) {
     val own = state.profile?.id ?: return
+    var cancelling by remember { mutableStateOf<PlanProposal?>(null) }
     val now = Instant.now()
     val plans = Plans.upcoming(state.plans, now).filter { it.status != "cancelled" }
     if (plans.isEmpty()) return
@@ -1899,16 +1907,28 @@ private fun PlansPanel(state: AccountState, actions: AccountActions) {
                         }
                         plan.status == "pending" -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Esperando respuesta de $other", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { actions.cancelPlan(plan.id) }, enabled = !state.busy) { Text("Cancelar") }
+                            TextButton(onClick = { cancelling = plan }, enabled = !state.busy) { Text("Cancelar propuesta") }
                         }
-                        plan.status == "accepted" -> StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                        plan.status == "accepted" -> {
+                            StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                            if (Plans.canCancel(plan, own, now)) TextButton(onClick = { cancelling = plan }, enabled = !state.busy) {
+                                Text("Cancelar plan", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                         else -> StatusPill(if (received) "Lo rechazaste" else "$other no puede", TextMuted)
                     }
                 }
             }
         }
     }
+    cancelling?.let { plan -> CancelPlanConfirmation(plan, { cancelling = null }, { actions.cancelPlan(plan.id); cancelling = null }) }
 }
+
+@Composable
+private fun CancelPlanConfirmation(plan: PlanProposal, dismiss: () -> Unit, confirm: () -> Unit) =
+    Confirm("¿Cancelar «${plan.title}»?",
+        if (plan.status == "accepted") "El plan se quitará de los horarios de ambos y se avisará a la otra persona."
+        else "Se retirará la propuesta y se avisará a la otra persona.", dismiss, confirm)
 
 @Composable
 private fun PlanSheet(person: AccountProfile, slot: FreeSlot, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
@@ -2282,11 +2302,13 @@ private enum class PlaceSource(val label: String) { Here("Dónde estoy ahora"), 
 private const val MAP_POINT = "Punto elegido en el mapa"
 
 @Composable
-private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+internal fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
     var label by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.LABELS.first()) }
     var submitted by remember { mutableStateOf(false) }
-    val count = state.autoPlaces.size
-    LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
+    val savedIds = remember { state.autoPlaces.map { it.id }.toSet() }
+    LaunchedEffect(state.autoPlaces, submitted) {
+        if (submitted && state.autoPlaces.any { it.id !in savedIds }) dismiss()
+    }
     var source by rememberSaveable { mutableStateOf(PlaceSource.Here) }
     val byAddress = source != PlaceSource.Here
     // Follows the chosen label («En el trabajo» → Trabajo) until the person picks one themselves.

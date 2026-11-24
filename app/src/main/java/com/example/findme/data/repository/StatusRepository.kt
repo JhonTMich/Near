@@ -15,6 +15,7 @@ import java.time.ZonedDateTime
 
 object StatusRepository {
     val SYSTEM_ZONE: ZoneId get() = ZoneId.systemDefault()
+    private val placeLabels = setOf("en casa", "en la universidad", "en el trabajo", "en el gimnasio", "en la calle")
 
     fun calculateStatus(
         displayName: String,
@@ -32,9 +33,14 @@ object StatusRepository {
         val current = overrides.filter { overrideDto ->
             overrideDto.isActive && parseIsoToInstant(overrideDto.expiresAt)?.isAfter(nowInLima.toInstant()) == true
         }
-        // Find an unexpired manual status; the current place only goes next to it or to the schedule.
-        val activeOverride = current.firstOrNull { !it.isPlace }
         val place = current.firstOrNull { it.isPlace }?.customLocation?.trim()?.takeIf { it.isNotEmpty() }
+        // Older versions wrote automatic place labels into personal_status. A live place supersedes
+        // those location-only labels, so "En casa" cannot hide today's work and contradict the fix.
+        // Activity announcements such as "Estudiando" still take precedence over the schedule.
+        val activeOverride = current.firstOrNull { status ->
+            !status.isPlace && !(place != null && status.customMessage.isNullOrBlank() &&
+                status.customLocation.trim().lowercase(java.util.Locale.ROOT) in placeLabels)
+        }
 
         val active = currentOccurrences.firstOrNull { !nowInLima.isBefore(it.window.start) && nowInLima.isBefore(it.window.end) }
 

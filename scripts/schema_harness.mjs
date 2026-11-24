@@ -15,7 +15,7 @@ export const ab = '10000000-0000-0000-0000-000000000001';
 export const ac = '10000000-0000-0000-0000-000000000002';
 export const ad = '10000000-0000-0000-0000-000000000003';
 
-export async function freshDatabase() {
+export async function freshDatabase({ skipMigrations = [] } = {}) {
   const db = new PGlite({ extensions: { btree_gist } });
   await db.exec(`create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin;
     create schema auth; create schema extensions;
@@ -26,6 +26,7 @@ export async function freshDatabase() {
   const files = (await readdir(new URL('../supabase/migrations/', import.meta.url))).filter((n) => n.endsWith('.sql')).sort();
   for (const name of files) {
     if (name.includes('_programar_')) continue; // pg_cron / pg_net schedules
+    if (skipMigrations.includes(name)) continue;
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'));
   }
   await db.exec(`set session_replication_role = replica;

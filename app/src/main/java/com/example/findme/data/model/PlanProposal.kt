@@ -15,5 +15,7 @@ data class PlanProposal(
     @SerialName("ends_at") val endsAt: String,
     /** pending, accepted, declined or cancelled. */
     val status: String = "pending",
-    @SerialName("answered_at") val answeredAt: String? = null
+    @SerialName("answered_at") val answeredAt: String? = null,
+    @SerialName("sender_schedule_id") val senderScheduleId: String? = null,
+    @SerialName("recipient_schedule_id") val recipientScheduleId: String? = null
 )

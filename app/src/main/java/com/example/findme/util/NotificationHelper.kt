@@ -17,9 +17,9 @@ object NotificationHelper {
     enum class Channel(val id: String, val title: String, val description: String) {
         Activities("near_activities", "Actividades de tu gente", "Cuando una persona conectada comienza una actividad."),
         Statuses("findme_status_channel", "Estados de tu gente", "Cuando tu gente comparte, cambia o quita su estado."),
-        Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos que recibes."),
+        Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos, propuestas de planes y solicitudes de sincronización."),
         Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario."),
-        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a un plan que propusiste."),
+        Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a tu plan o solicitud de sincronización."),
         Alarms("near_alarms", "Alarmas de tus actividades", "La alarma que suena antes de una actividad cuando eliges el modo alarma.")
     }
 
@@ -68,13 +68,13 @@ object NotificationHelper {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
     }
 
-    fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null) {
+    fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null, alertAgain: Boolean = false) {
         createNotificationChannel(context)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open(context, if (channel == Channel.Reminders) OPEN_SCHEDULE else OPEN_PEOPLE))
-            .setOnlyAlertOnce(true).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(!alertAgain).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(if (channel == Channel.Messages) NotificationCompat.CATEGORY_MESSAGE else if (channel == Channel.Reminders) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             .apply { reply?.let { addAction(replyAction(context, id, it)) } }
             .build()

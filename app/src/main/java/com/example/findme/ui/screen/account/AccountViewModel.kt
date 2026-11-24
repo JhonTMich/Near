@@ -183,6 +183,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
                     "FM006" -> "El contacto dejó de compartir su horario. La sincronización sigue activa. Puedes cerrarla sin guardar una copia."
                     "FM007" -> "La conexión terminó. Ya no se puede aceptar el plan."
+                    "FM008" -> "No pudimos identificar con seguridad las actividades de este plan antiguo. Revisa ambos horarios antes de quitarlo."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
@@ -421,6 +422,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
     suspend fun observeWhileVisible(): Unit = coroutineScope {
+        launch {
+            while (isActive) {
+                runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
+                delay(60_000)
+            }
+        }
         launch {
             while (isActive) {
                 delay(15_000)
@@ -732,8 +739,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         refreshAfterSave(if (accept) "Plan aceptado. Ya está en tu horario." else "Respuesta enviada.")
     }
     override fun cancelPlan(id: String) = perform {
+        val accepted = _state.value.plans.any { it.id == id && it.status == "accepted" }
         val plan = repository.cancelPlan(id)
-        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }) }
+        refreshAfterSave(if (accepted) "Plan cancelado. Se quitó de los horarios de ambos." else "Propuesta cancelada.")
     }
 
     override fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) = perform {
@@ -766,6 +775,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         // Opening the app is enough to move a place an older version saved as your status.
         runCatching { com.example.findme.places.AutoPlaces.moveLegacyStatus(getApplication(), owner) }
         runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+        runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
     }
     /** Saved places are home addresses and the like: they do not outlive the session on this phone. */
     private suspend fun forgetAutoPlaces(owner: String? = repository.auth.currentUserOrNull()?.id) {
@@ -787,6 +797,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
         val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address, category)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+        refreshPlaceStatus(owner)
+    }
+
+    /** Local storage completes the form; Play services and the network must not delay that confirmation. */
+    private fun refreshPlaceStatus(owner: String) {
+        viewModelScope.launch {
+            if (repository.auth.currentUserOrNull()?.id != owner) return@launch
+            runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+            runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
+            runCatching { load() }
+        }
     }
     override suspend fun searchAddress(query: String) =
         runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
@@ -831,10 +852,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     override fun removeAutoPlace(id: String) = perform {
-        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
-        // Without places «En la calle» has no meaning: remove it if it was shared.
-        if (places.isEmpty()) runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication()) }
+        val owner = repository.userId()
+        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), owner, id)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
+        refreshPlaceStatus(owner)
     }
     /** After the location permission changes, so the geofences match what Android now allows. */
     override fun refreshAutoPlaces() {

@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -83,8 +85,9 @@ object AutoPlaces {
         if (schedule.modality == "virtual" || schedule.category !in CATEGORIES) emptyList()
         else places.filter { it.activityCategory == schedule.category }
     private val json = Json { ignoreUnknownKeys = true }
+    private val syncMutex = Mutex()
     private fun placesKey(owner: String) = stringPreferencesKey("auto_places_$owner")
-    /** Which place set the current automatic status, so leaving another place or a manual status is left alone. */
+    /** Last place successfully shared; retained until its replacement or removal reaches the server. */
     private fun markerKey(owner: String) = stringPreferencesKey("auto_status_$owner")
     private fun insideKey(owner: String) = stringPreferencesKey("auto_inside_$owner")
     private fun markedAtKey(owner: String) = stringPreferencesKey("auto_status_at_$owner")
@@ -117,7 +120,6 @@ object AutoPlaces {
         val updated = current + AutoPlace(UUID.randomUUID().toString(), label.trim(), latitude, longitude, radius,
             address?.trim()?.takeIf { it.isNotEmpty() }, category?.takeIf { it in CATEGORIES } ?: NO_CATEGORY)
         context.dataStore.edit { it[placesKey(owner)] = encode(updated) }
-        register(context, owner)
         return updated
     }
 
@@ -155,9 +157,8 @@ object AutoPlaces {
         val updated = places(context, owner).filterNot { it.id == id }
         context.dataStore.edit { prefs ->
             prefs[placesKey(owner)] = encode(updated)
-            if (prefs[markerKey(owner)] == id) prefs.remove(markerKey(owner))
         }
-        register(context, owner)
+        setInside(context, owner, inside(context, owner) - id)
         return updated
     }
 
@@ -173,8 +174,9 @@ object AutoPlaces {
         val client = LocationServices.getGeofencingClient(context)
         runCatching { client.removeGeofences(pendingIntent(context)).awaitDone() }
         val places = owner?.let { places(context, it) }.orEmpty()
-        // The initial enter trigger reports again the places the phone is in now.
-        if (owner != null) setInside(context, owner, emptySet())
+        PlaceStatusWorker.scheduleChecks(context, owner?.takeIf { places.isNotEmpty() })
+        // Preserve known membership until Android reports changes, including when registering fails.
+        if (owner != null) setInside(context, owner, inside(context, owner).filter { id -> places.any { it.id == id } }.toSet())
         if (places.isEmpty() || !hasLocation(context)) return
         val request = GeofencingRequest.Builder()
             .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
@@ -242,8 +244,8 @@ object AutoPlaces {
     fun desired(places: List<AutoPlace>, inside: List<String>, marker: String?, street: Change, stale: Boolean = false): Change {
         val here = inside.mapNotNull { id -> places.find { it.id == id } }
         if (here.isNotEmpty()) {
-            if (!stale && here.any { it.id == marker }) return Change.Nothing
-            val latest = here.firstOrNull { it.id == marker } ?: here.last()
+            val latest = here.last()
+            if (!stale && latest.id == marker) return Change.Nothing
             return Change.Share(latest.label, latest.id)
         }
         if (street is Change.Street) return if (!stale && marker == STREET_MARKER) Change.Nothing else street
@@ -313,7 +315,8 @@ object AutoPlaces {
         } ?: return
         val places = places(context, owner)
         val place = places.firstOrNull { it.id in placeIds } ?: return
-        val inside = (if (entering) inside(context, owner) + placeIds else inside(context, owner) - placeIds.toSet())
+        val previous = inside(context, owner) - placeIds.toSet()
+        val inside = (if (entering) previous + placeIds else previous)
             .filter { id -> places.any { it.id == id } }.toSet()
         setInside(context, owner, inside)
         PlaceStatusWorker.enqueue(context, owner)
@@ -323,7 +326,10 @@ object AutoPlaces {
     }
 
     /** Shares the place that matches where the phone is now. Throws when the network fails, to retry. */
-    internal suspend fun sync(context: Context, owner: String) {
+    internal suspend fun sync(context: Context, owner: String) = syncMutex.withLock {
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        if (auth.currentUserOrNull()?.id != owner) return@withLock
         moveLegacyStatus(context, owner)
         val inside = inside(context, owner)
         val prefs = context.dataStore.data.first()
@@ -346,17 +352,37 @@ object AutoPlaces {
         val auth = SupabaseClientProvider.client.auth
         auth.awaitInitialization()
         val owner = auth.currentUserOrNull()?.id ?: return
-        if (locate) currentLocation(context)?.let { here ->
-            setInside(context, owner, places(context, owner).filter { place ->
-                FloatArray(1).also { Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, it) }[0] <= place.radius
-            }.map { it.id }.toSet())
-        }
+        if (!refreshInside(context, owner, locate)) return
+        // Persist the retry before attempting the network, including when the app is about to close.
+        PlaceStatusWorker.enqueue(context, owner)
         sync(context, owner)
     }
+
+    /** Fresh fixes replace cached membership; without a fix an old location must not be renewed. */
+    internal suspend fun refreshInside(context: Context, owner: String, locate: Boolean = true): Boolean {
+        val saved = places(context, owner)
+        if (saved.isEmpty()) {
+            setInside(context, owner, emptySet())
+            return true
+        }
+        if (!locate) return true
+        val here = currentLocation(context) ?: return false
+        setInside(context, owner, detectedPlaces(saved) { place ->
+            FloatArray(1).also { Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, it) }[0]
+        })
+        return true
+    }
+
+    /** Nearest matching zone goes last, matching the priority of the latest geofence entry. */
+    internal fun detectedPlaces(places: List<AutoPlace>, distanceTo: (AutoPlace) -> Float): Set<String> =
+        places.map { it to distanceTo(it) }.filter { (place, distance) -> distance <= place.radius }
+            .sortedByDescending { it.second }.map { it.first.id }.toSet()
 }
 
 private suspend fun com.google.android.gms.tasks.Task<*>.awaitDone() = suspendCancellableCoroutine { continuation ->
-    addOnCompleteListener { continuation.resume(Unit) }
+    addOnSuccessListener { if (continuation.isActive) continuation.resume(Unit) }
+    addOnFailureListener { if (continuation.isActive) continuation.resumeWith(Result.failure(it)) }
+    addOnCanceledListener { continuation.cancel() }
 }
 
 /** Receives the enter and exit transitions of the saved places. Not exported: only Play services' PendingIntent reaches it. */

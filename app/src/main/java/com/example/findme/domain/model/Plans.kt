@@ -33,4 +33,14 @@ object Plans {
     fun upcoming(plans: List<PlanProposal>, now: Instant): List<PlanProposal> = plans.filter { plan ->
         runCatching { Instant.parse(plan.endsAt).isAfter(now) }.getOrDefault(false)
     }.sortedBy { it.startsAt }
+
+    fun canCancel(plan: PlanProposal, owner: String, now: Instant): Boolean =
+        (plan.senderId == owner || plan.recipientId == owner) &&
+            (plan.status == "accepted" || (plan.status == "pending" && plan.senderId == owner)) &&
+            runCatching { Instant.parse(plan.endsAt).isAfter(now) }.getOrDefault(false)
+
+    fun forActivity(plans: List<PlanProposal>, activityId: String, owner: String): PlanProposal? = plans.firstOrNull {
+        it.status == "accepted" && ((it.senderId == owner && it.senderScheduleId == activityId) ||
+            (it.recipientId == owner && it.recipientScheduleId == activityId))
+    }
 }

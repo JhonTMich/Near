@@ -66,7 +66,8 @@ try {
   await t.as(a);
   const [{ id: third }] = (await propose(b, 'Tercero', `(${start} + interval '3 hours')`)).rows;
   check((await db.query(`select status from public.cancel_plan('${third}')`)).rows[0].status === 'cancelled', 'The sender cancels a pending plan');
-  await t.rejects(db.query(`select * from public.cancel_plan('${plan}')`), 'FM004', 'An answered plan cannot be cancelled');
+  check((await db.query(`select status from public.cancel_plan('${plan}')`)).rows[0].status === 'cancelled',
+    'An accepted plan can also be cancelled');
   await t.admin();
   await db.exec(`insert into public.connection_preferences(connection_id, owner_id, muted) values ('${ac}', '${c}', true)`);
   await t.sent();

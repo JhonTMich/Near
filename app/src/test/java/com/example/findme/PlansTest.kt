@@ -52,4 +52,30 @@ class PlansTest {
         assertEquals("Beto no puede", refused.title)
         assertNull(PushAlerts.from(mapOf("type" to "plan", "id" to "p1", "user_id" to "u1", "title" to "Vernos")))
     }
+
+    @Test fun participantsCanCancelAcceptedPlansButOnlyTheSenderWithdrawsPendingOnes() {
+        val p = PlanProposal("p", "sender", "recipient", "Vernos", startsAt = now.plusSeconds(3600).toString(),
+            endsAt = now.plusSeconds(7200).toString(), status = "accepted", senderScheduleId = "activity-a", recipientScheduleId = "activity-b")
+        assertTrue(Plans.canCancel(p, "sender", now))
+        assertTrue(Plans.canCancel(p, "recipient", now))
+        assertFalse(Plans.canCancel(p, "stranger", now))
+        assertFalse(Plans.canCancel(p, "sender", now.plusSeconds(7200)))
+        assertFalse(Plans.canCancel(p.copy(status = "cancelled"), "sender", now))
+        assertTrue(Plans.canCancel(p.copy(status = "pending"), "sender", now))
+        assertFalse(Plans.canCancel(p.copy(status = "pending"), "recipient", now))
+        assertEquals(p, Plans.forActivity(listOf(p), "activity-a", "sender"))
+        assertEquals(p, Plans.forActivity(listOf(p), "activity-b", "recipient"))
+        assertNull(Plans.forActivity(listOf(p), "activity-a", "recipient"))
+        assertNull(Plans.forActivity(listOf(p.copy(status = "cancelled")), "activity-a", "sender"))
+    }
+
+    @Test fun cancellationPushExplainsThatBothSchedulesWereUpdated() {
+        val alert = requireNotNull(PushAlerts.from(mapOf("type" to "plan_cancelled", "id" to "p", "user_id" to "sender",
+            "name" to "Ana", "title" to "Vernos", "was_accepted" to "true")))
+        assertEquals("Ana canceló el plan", alert.title)
+        assertTrue(alert.text.contains("ambos"))
+        assertTrue(alert.requested)
+        assertEquals(PushAlerts.planId("p"), alert.id)
+        assertNull(PushAlerts.from(mapOf("type" to "plan_cancelled", "id" to "p")))
+    }
 }

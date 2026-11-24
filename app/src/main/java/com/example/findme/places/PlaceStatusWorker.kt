@@ -5,6 +5,8 @@ import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -27,6 +29,11 @@ class PlaceStatusWorker(context: Context, params: WorkerParameters) : CoroutineW
             auth.awaitInitialization()
             // Signed out or into another account since: the transition belonged to someone else.
             if (auth.currentUserOrNull()?.id != owner) return Result.success()
+            if (inputData.getBoolean(CHECK_LOCATION, false)) {
+                // Without background access we cannot confirm the person is still here.
+                if (!AutoPlaces.hasLocation(applicationContext) || !AutoPlaces.hasBackground(applicationContext)) return Result.success()
+                if (!AutoPlaces.refreshInside(applicationContext, owner)) return Result.retry()
+            }
             AutoPlaces.sync(applicationContext, owner)
             Result.success()
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -36,10 +43,25 @@ class PlaceStatusWorker(context: Context, params: WorkerParameters) : CoroutineW
     companion object {
         private const val NAME = "AutoPlacesStatus"
         private const val OWNER = "owner"
+        private const val CHECK_LOCATION = "check_location"
+        private const val PERIODIC_NAME = "AutoPlacesCheck"
         private const val MAX_ATTEMPTS = 8
 
+        /** Repairs missed transitions and renews the place even when no widget is installed. */
+        fun scheduleChecks(context: Context, owner: String?) {
+            val work = WorkManager.getInstance(context)
+            if (owner == null) {
+                work.cancelUniqueWork(PERIODIC_NAME)
+                return
+            }
+            work.enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE,
+                PeriodicWorkRequestBuilder<PlaceStatusWorker>(15, TimeUnit.MINUTES)
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setInputData(workDataOf(OWNER to owner, CHECK_LOCATION to true)).build())
+        }
+
         fun enqueue(context: Context, owner: String) {
-            WorkManager.getInstance(context).enqueueUniqueWork(NAME, ExistingWorkPolicy.REPLACE,
+            WorkManager.getInstance(context).enqueueUniqueWork(NAME, ExistingWorkPolicy.APPEND_OR_REPLACE,
                 OneTimeWorkRequestBuilder<PlaceStatusWorker>()
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
