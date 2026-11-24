@@ -199,7 +199,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
             Column(Modifier.fillMaxSize()
                 .verticalScroll(rememberScrollState()).imePadding()
                 .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                state.error?.let { error -> Panel {
+                state.error?.takeIf { state.signedIn || state.confirmationEmail != null }?.let { error -> Panel {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.error)
                         Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -426,6 +426,7 @@ private fun LoginForm(state: AccountState, actions: AccountActions, viewport: Dp
                 resending -> "Enviar confirmación"; else -> "Entrar" },
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
+        state.error?.let { LoginError(it) }
         if (mode == "login") TextButton(onClick = { mode = "recover"; password = ""; passwordVisible = false }, enabled = !state.busy, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("¿Olvidaste tu contraseña?", color = TextSecondary)
         }
