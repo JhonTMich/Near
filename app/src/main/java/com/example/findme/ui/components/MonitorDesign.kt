@@ -58,8 +58,9 @@ fun ActivityTimelineCard(schedule: ScheduleDto, active: Boolean, last: Boolean =
     val accent = category.accentColor
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.width(48.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (schedule.continuesOn(displayDay)) "Ayer" else schedule.startTime.take(5),
-                Modifier.padding(top = 14.dp), style = MonoLabel, color = if (active) accent else TextSecondary)
+            Text(if (schedule.continuesOn(displayDay)) "Desde ayer" else schedule.startTime.take(5),
+                Modifier.padding(top = 14.dp), style = MonoLabel, color = if (active) accent else TextSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             if (!last) Box(Modifier.padding(top = 8.dp, bottom = 2.dp).width(1.dp).weight(1f).background(CardBorder))
         }
         NearCard(Modifier.weight(1f).padding(bottom = 4.dp),
