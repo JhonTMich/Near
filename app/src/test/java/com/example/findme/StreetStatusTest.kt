@@ -93,6 +93,7 @@ class StreetStatusTest {
     @Test fun enteringAPlaceReplacesStreet() {
         val home = AutoPlace("home", "En casa", -12.05, -77.04)
         assertEquals(Change.Share("En casa", "home"),
-            AutoPlaces.decide(true, home, marker = AutoPlaces.STREET_MARKER, manualStatus = false))
+            AutoPlaces.desired(listOf(home), listOf("home"), marker = AutoPlaces.STREET_MARKER, manualStatus = false,
+                entered = true, street = Change.Nothing))
     }
 }
