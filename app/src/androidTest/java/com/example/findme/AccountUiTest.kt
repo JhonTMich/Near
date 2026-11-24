@@ -68,7 +68,7 @@ class AccountUiTest {
         screenshot("brand-my-day", composeOnly = true)
         compose.onNodeWithTag("near-tab-Horario").performClick()
         compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
-        compose.onNodeWithText("Tiempo libre · hasta las 14:00").assertExists()
+        compose.onNodeWithText("Tiempo libre · hasta 14:00").assertExists()
         screenshot("brand-schedule", composeOnly = true)
         compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithTag("near-heading-Personas").assertIsDisplayed()

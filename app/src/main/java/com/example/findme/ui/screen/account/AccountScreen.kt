@@ -792,10 +792,19 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     }
     val date = dates[day - 1]
     PageHeading("", "Horario", "")
-    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it })
-    HorizontalDivider(color = CardBorder)
-    Text(date.longDate().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.headlineSmall)
+    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it }, activities = week.map { it.size })
     val occurrences = week[day - 1]
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(date.longDate().replaceFirstChar { it.titlecase() }, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+        val busyMinutes = occurrences.sumOf { occurrence ->
+            java.time.Duration.between(maxOf(date.atStartOfDay(zone), occurrence.window.start),
+                minOf(date.plusDays(1).atStartOfDay(zone), occurrence.window.end)).toMinutes().coerceAtLeast(0)
+        }
+        if (busyMinutes > 0) {
+            val classes = occurrences.all { ActivityCategory.fromKey(it.schedule.category, it.schedule.title) == ActivityCategory.UNIVERSITY }
+            Text("${compactDuration(busyMinutes)} de ${if (classes) "clase" else "actividad"}", style = MonoLabel, color = TextSecondary)
+        }
+    }
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
     }.filter { (_, exception) -> !exception.paused && (exception.cancelled || exception.date != date.toString()) }
@@ -826,9 +835,14 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         val end = minOf(dayEnd, occurrence.window.end)
         occupiedUntil?.takeIf { it.isBefore(start) }?.let { gapStart ->
             ScheduleTimeRow(gapStart.format(hourFormat)) {
-                Surface(color = FreeSurface, contentColor = StatusGreenText, shape = RoundedCornerShape(12.dp)) {
-                    Text("Tiempo libre · hasta las ${start.format(hourFormat)}",
-                        Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.labelMedium)
+                Surface(color = FreeSurface, contentColor = FreeInk, shape = RoundedCornerShape(16.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(7.dp).background(FreeInk, CircleShape))
+                        Text("Tiempo libre · hasta ${start.format(hourFormat)}", Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text(compactDuration(java.time.Duration.between(gapStart, start).toMinutes()), style = MonoLabel)
+                    }
                 }
             }
         }
@@ -838,12 +852,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         val category = ActivityCategory.fromKey(schedule.category)
         val reprogrammed = recurring.occurrenceExceptions.containsKey(occurrence.originalDate.toString())
         ScheduleTimeRow(if (occurrence.window.start.isBefore(dayStart)) "Desde ayer" else start.format(hourFormat)) {
-            Surface(shape = RoundedCornerShape(14.dp), color = SlateContainer, contentColor = TextPrimary) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            NearCard(padding = PaddingValues(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 14.dp), spacing = 4.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
+                        Icon(category.icon, null, Modifier.size(18.dp), tint = category.accentColor)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             schedule.sourceOwnerId?.let { sourceOwner ->
                                 val sourceName = state.profiles.firstOrNull { it.id == sourceOwner }?.displayName
                                 Text(
@@ -855,7 +868,6 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     Text("Con ajustes personales", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                                 }
                             }
-                            Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                         }
                         var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
                         Box {
@@ -881,12 +893,16 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                             }
                         }
                     }
-                    val activityDetails = listOf(category.label, schedule.modality, schedule.location)
-                        .filter { it.isNotBlank() }.joinToString(" · ")
-                    Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                    if (reprogrammed) StatusPill("Reprogramada", BrandSky)
-                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
-                }
+                    Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        val activityDetails = listOf(category.label, schedule.modality, schedule.location)
+                            .filter { it.isNotBlank() }.joinToString(" · ")
+                        Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        if (reprogrammed || schedule.isOneOff) Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (reprogrammed) StateChip("Reprogramada", FreeInk, FreeSurface, dot = false)
+                            if (schedule.isOneOff) StateChip("Solo el ${occurrence.originalDate.longDate()}", FreeInk, FreeSurface, dot = false)
+                        }
+                    }
             }
         }
     }
@@ -933,10 +949,8 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
 
 @Composable
 private fun ScheduleTimeRow(time: String, content: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(time, Modifier.width(55.dp).padding(top = 12.dp), color = TextSecondary,
-            style = MaterialTheme.typography.labelMedium)
-        Box(Modifier.width(1.dp).fillMaxHeight().background(CardBorder))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(time, Modifier.width(50.dp).padding(top = 14.dp), color = TextSecondary, style = MonoLabel)
         Box(Modifier.weight(1f)) { content() }
     }
 }
@@ -1039,9 +1053,19 @@ private fun CalendarImportSheet(result: com.example.findme.domain.model.IcsResul
 private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: () -> Unit, onDelete: (SchedulePause) -> Unit) {
     val upcoming = state.pauses.filter { it.userId == state.profile?.id && it.range()?.second?.isBefore(today) == false }
         .sortedBy { it.startDate }
-    Panel {
-        SectionHeading(Icons.Default.BeachAccess, "Pausas del horario", "Vacaciones, feriados o semanas sin clases.")
-        upcoming.forEach { pause ->
+    NearCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
+        Row(Modifier.fillMaxWidth().clickable(enabled = !state.busy, onClickLabel = "Pausar mi horario", onClick = onAdd)
+            .padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            IconBubble(Icons.Default.BeachAccess)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Pausas del horario", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Vacaciones, feriados o semanas sin clases.", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Pausar mi horario", tint = TextSecondary)
+        }
+        if (upcoming.isNotEmpty()) Column(Modifier.padding(start = 16.dp, end = 8.dp, bottom = 8.dp)) {
+          HorizontalDivider(color = CardBorder, modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
+          upcoming.forEach { pause ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(pause.title, fontWeight = FontWeight.SemiBold)
@@ -1051,9 +1075,7 @@ private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: ()
                     Icon(Icons.Default.DeleteOutline, "Quitar la pausa ${pause.title}", tint = TextMuted)
                 }
             }
-        }
-        OutlinedButton(onClick = onAdd, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.BeachAccess, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Pausar mi horario")
+          }
         }
     }
 }
