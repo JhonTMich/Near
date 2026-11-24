@@ -423,6 +423,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     suspend fun observeWhileVisible(): Unit = coroutineScope {
         launch {
             while (isActive) {
+                runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
+                delay(60_000)
+            }
+        }
+        launch {
+            while (isActive) {
                 delay(15_000)
                 val cutoff = Instant.now().minusSeconds(86400)
                 _state.update { old -> old.copy(signals = old.signals.filter {
@@ -766,6 +772,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         // Opening the app is enough to move a place an older version saved as your status.
         runCatching { com.example.findme.places.AutoPlaces.moveLegacyStatus(getApplication(), owner) }
         runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+        runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
     }
     /** Saved places are home addresses and the like: they do not outlive the session on this phone. */
     private suspend fun forgetAutoPlaces(owner: String? = repository.auth.currentUserOrNull()?.id) {
@@ -787,6 +794,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             ?: throw IllegalArgumentException("No pudimos saber dónde estás. Activa la ubicación del teléfono e inténtalo de nuevo.")
         val places = com.example.findme.places.AutoPlaces.add(getApplication(), owner, label, latitude, longitude, radius, at?.address, category)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar guardado. Al llegar compartiremos «${label.trim()}».") }
+        refreshPlaceStatus(owner)
+    }
+
+    /** Local storage completes the form; Play services and the network must not delay that confirmation. */
+    private fun refreshPlaceStatus(owner: String) {
+        viewModelScope.launch {
+            if (repository.auth.currentUserOrNull()?.id != owner) return@launch
+            runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
+            runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
+            runCatching { load() }
+        }
     }
     override suspend fun searchAddress(query: String) =
         runCatching { com.example.findme.places.AutoPlaces.search(getApplication(), query) }.getOrDefault(emptyList())
@@ -831,10 +849,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     override fun removeAutoPlace(id: String) = perform {
-        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), repository.userId(), id)
-        // Without places «En la calle» has no meaning: remove it if it was shared.
-        if (places.isEmpty()) runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication()) }
+        val owner = repository.userId()
+        val places = com.example.findme.places.AutoPlaces.remove(getApplication(), owner, id)
         _state.update { it.copy(autoPlaces = places, notice = "Lugar quitado.") }
+        refreshPlaceStatus(owner)
     }
     /** After the location permission changes, so the geofences match what Android now allows. */
     override fun refreshAutoPlaces() {

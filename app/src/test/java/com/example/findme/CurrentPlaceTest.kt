@@ -48,6 +48,36 @@ class CurrentPlaceTest {
         assertNull(status(emptyList(), emptyList()).place)
     }
 
+    @Test fun anOldAutomaticHomeStatusCannotHideWorkAtTheDetectedWorkplace() {
+        val work = virtualClass.copy(title = "Trabajo", category = "work", modality = "presencial")
+        val oldHome = studying.copy(customLocation = "En casa")
+        val atWork = home.copy(customLocation = "En el trabajo")
+        val current = status(listOf(work), listOf(oldHome, atWork)) as UserCurrentStatus.InClass
+        assertEquals("Trabajo", current.currentSchedule.title)
+        assertEquals("En el trabajo", current.place)
+        val widget = widgetStatus("Persona", listOf(work), listOf(oldHome, atWork), monday)
+        assertEquals("Trabajo", widget.title)
+        assertFalse(widget.detail.contains("En casa"))
+    }
+
+    @Test fun anOldAutomaticHomeStatusCannotKeepHomeAsTheTitleWhenFreeAtWork() {
+        val current = status(emptyList(), listOf(studying.copy(customLocation = "En casa"),
+            home.copy(customLocation = "En el trabajo")))
+        assertTrue(current is UserCurrentStatus.FreeTime)
+        assertEquals("En el trabajo", current.place)
+    }
+
+    @Test fun aLocationStatusWithoutAnAutomaticFixStillWorks() {
+        val current = status(emptyList(), listOf(studying.copy(customLocation = "En casa")))
+        assertEquals("En casa", (current as UserCurrentStatus.Override).customLocation)
+    }
+
+    @Test fun aManualAnnouncementIsPreservedWhenTheAutomaticPlaceChanges() {
+        val announcement = studying.copy(customLocation = "En casa", customMessage = "Trabajando a distancia")
+        val current = status(listOf(virtualClass), listOf(announcement, home.copy(customLocation = "En el trabajo")))
+        assertEquals("Trabajando a distancia", (current as UserCurrentStatus.Override).customMessage)
+    }
+
     @Test fun theWidgetPutsThePlaceFirstInTheDetail() {
         assertEquals("En casa · Sin actividad", widgetStatus("Persona", emptyList(), listOf(home), monday).detail)
         assertTrue(widgetStatus("Persona", emptyList(), listOf(home), monday).free)

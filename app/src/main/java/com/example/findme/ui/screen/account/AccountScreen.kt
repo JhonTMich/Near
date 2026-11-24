@@ -2282,11 +2282,13 @@ private enum class PlaceSource(val label: String) { Here("Dónde estoy ahora"), 
 private const val MAP_POINT = "Punto elegido en el mapa"
 
 @Composable
-private fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
+internal fun AutoPlaceSheet(state: AccountState, actions: AccountActions, dismiss: () -> Unit) {
     var label by rememberSaveable { mutableStateOf(com.example.findme.places.AutoPlaces.LABELS.first()) }
     var submitted by remember { mutableStateOf(false) }
-    val count = state.autoPlaces.size
-    LaunchedEffect(state.autoPlaces.size) { if (submitted && state.autoPlaces.size > count) dismiss() }
+    val savedIds = remember { state.autoPlaces.map { it.id }.toSet() }
+    LaunchedEffect(state.autoPlaces, submitted) {
+        if (submitted && state.autoPlaces.any { it.id !in savedIds }) dismiss()
+    }
     var source by rememberSaveable { mutableStateOf(PlaceSource.Here) }
     val byAddress = source != PlaceSource.Here
     // Follows the chosen label («En el trabajo» → Trabajo) until the person picks one themselves.
