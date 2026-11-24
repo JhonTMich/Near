@@ -41,6 +41,8 @@ try {
 
   // Activity pushes: a regular occurrence on a paused date is not announced.
   await t.admin();
+  // PostgreSQL now() stays fixed within the transaction, even if these assertions cross a minute.
+  await db.exec('begin');
   await db.exec(`insert into public.personal_schedule(user_id, day_of_week, start_time, end_time, title)
     select '${a}', extract(isodow from now() at time zone 'UTC')::int,
            date_trunc('minute', now() at time zone 'UTC')::time,
@@ -56,6 +58,7 @@ try {
     await db.exec(`select private.push_due_events();`);
     check((await t.sent()).some((call) => call.type === 'activity' && call.recipients.includes(b)), 'Without the pause the push is sent');
   }
+  await db.exec('commit');
 
   // Limit: twenty pauses per person.
   await t.as(a);
