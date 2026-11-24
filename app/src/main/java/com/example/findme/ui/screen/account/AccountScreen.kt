@@ -151,22 +151,29 @@ fun AccountContent(state: AccountState, actions: AccountActions,
     LaunchedEffect(state.scheduleRevision, state.signedIn) { if (state.scheduleRevision > 0 && state.signedIn) tab = "Horario" }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
-    Box(Modifier.fillMaxSize().background(AppBackground)) {
+    Box(Modifier.fillMaxSize().nearBackdrop()) {
     Scaffold(containerColor = Color.Transparent, contentColor = TextPrimary, snackbarHost = { NearSnackbarHost(snackbar) }, topBar = {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!state.signedIn) BrandMark(Modifier.size(40.dp))
-            Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-            if (state.signedIn) {
-                IconButton(onClick = actions::refresh, enabled = !state.busy) {
-                    if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
-                    else Icon(Icons.Default.Refresh, "Actualizar", tint = TextSecondary)
+        // Signed in, the bar is its own band; on the sign-in screen it sits on the backdrop with the mark.
+        Column(Modifier.fillMaxWidth().then(if (state.signedIn) Modifier.background(BarBg) else Modifier)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!state.signedIn) BrandMark(Modifier.size(40.dp))
+                Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                if (state.signedIn) {
+                    Surface(onClick = actions::refresh, enabled = !state.busy, shape = CircleShape, color = Color.Transparent,
+                        contentColor = TextSecondary, border = BorderStroke(1.dp, CardBorder), modifier = Modifier.size(42.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
+                            else Icon(Icons.Default.Refresh, "Actualizar", Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
+            if (state.signedIn) HorizontalDivider(color = CardBorder)
         }
     }, bottomBar = {
         if (state.signedIn && state.profile?.needsProfile == false) {
-            Column(Modifier.fillMaxWidth().background(AppBackground).navigationBarsPadding()) {
+            Column(Modifier.fillMaxWidth().background(BarBg).navigationBarsPadding()) {
                 HorizontalDivider(color = CardBorder)
                 NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp,
                     windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.heightIn(min = 68.dp)) {
@@ -174,11 +181,12 @@ fun AccountContent(state: AccountState, actions: AccountActions,
                         Triple("Personas", "Personas", Icons.Default.PeopleOutline), Triple("Cuenta", "Perfil", Icons.Default.PersonOutline)).forEach { (id, title, icon) ->
                         NavigationBarItem(selected = tab == id, onClick = { tab = id },
                             modifier = Modifier.testTag("near-tab-$title"),
-                            icon = { Icon(icon, null, Modifier.size(22.dp)) },
-                            label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(selectedIconColor = TextPrimary,
-                                selectedTextColor = TextPrimary, indicatorColor = AccentContainer,
-                                unselectedIconColor = TextMuted, unselectedTextColor = TextMuted))
+                            icon = { Icon(icon, null, Modifier.size(21.dp)) },
+                            label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (tab == id) FontWeight.Bold else FontWeight.Medium) },
+                            colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = AccentContainer,
+                                unselectedIconColor = TextSecondary, unselectedTextColor = TextSecondary))
                     }
                 }
             }
@@ -190,7 +198,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
             val viewport = maxHeight
             Column(Modifier.fillMaxSize()
                 .verticalScroll(rememberScrollState()).imePadding()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 state.error?.let { error -> Panel {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.error)
@@ -298,29 +306,29 @@ private fun resendSecondsLeft(sentAt: Long?): Int {
 private fun countdown(seconds: Int) = "%d:%02d".format(Locale.ROOT, seconds / 60, seconds % 60)
 
 @Composable
-private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        if (eyebrow.isNotBlank()) Text(eyebrow.uppercase(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp)
-        Text(title, Modifier.testTag("near-heading-$title").semantics { heading() },
-            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+private fun PageHeading(eyebrow: String, title: String, subtitle: String, trailing: String? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (eyebrow.isNotBlank()) Eyebrow(eyebrow, color = MaterialTheme.colorScheme.primary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f).testTag("near-heading-$title").semantics { heading() },
+                style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            trailing?.let { Text(it, color = TextSecondary, style = MonoLabel) }
+        }
         if (subtitle.isNotBlank()) Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 private fun Panel(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, CardBorder),
-        colors = CardDefaults.cardColors(containerColor = CardBg)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
-    }
+    NearCard(padding = PaddingValues(18.dp), spacing = 14.dp, content = content)
 }
 
 @Composable
 private fun SectionHeading(icon: ImageVector, title: String, subtitle: String? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        AccentIcon(icon, MaterialTheme.colorScheme.primary)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        IconBubble(icon)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             subtitle?.let { Text(it, color = TextSecondary, style = MaterialTheme.typography.bodySmall) }
         }
     }
@@ -546,6 +554,20 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
             is UserCurrentStatus.Error -> "Estado no disponible"
             is UserCurrentStatus.Loading -> "Consultando actividad…"
         }
+        // The span of what is shown now, for the bar under the title: the activity, or the shared status
+        // from the moment it was shared until it ends.
+        val span: Pair<ZonedDateTime, ZonedDateTime>? = when (current) {
+            is UserCurrentStatus.InClass -> today.firstOrNull { it.schedule.id == current.currentSchedule.id &&
+                !now.isBefore(it.window.start) && now.isBefore(it.window.end) }?.let { it.window.start to it.window.end }
+            is UserCurrentStatus.Override -> state.statuses.firstOrNull { !it.isPlace && it.isActive && it.customLocation == current.customLocation }
+                ?.let { dto ->
+                    val start = dto.createdAt?.let(StatusRepository::parseIsoToInstant)?.atZone(now.zone)
+                    val end = StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)
+                    if (start != null && end != null && start.isBefore(end)) start to end else null
+                }
+            else -> null
+        }
+        val remaining = span?.let { java.time.Duration.between(now, it.second).toMinutes().coerceAtLeast(0) }
         val detail = when (current) {
             is UserCurrentStatus.FreeTime -> next?.let { "Hasta las ${it.window.start.format(hourFormat)}" }
                 ?: "Sin más actividades hoy"
@@ -553,51 +575,64 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
                 "Termina en ${formatDurationMinutes(current.remainingMinutes)}").filter { it.isNotBlank() }.joinToString(" · ")
             is UserCurrentStatus.Override -> listOfNotNull(
                 current.customMessage?.takeIf { it.isNotBlank() },
-                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" }
+                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" },
+                remaining?.let { "${compactDuration(it)} restantes" }
             ).joinToString(" · ")
             is UserCurrentStatus.Error -> current.message
             is UserCurrentStatus.Loading -> ""
         }.let { text -> listOfNotNull(current.place, text.takeIf { it.isNotBlank() }).joinToString(" · ") }
-        Surface(shape = RoundedCornerShape(22.dp), color = AccentContainer, contentColor = TextPrimary) {
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(title, style = MaterialTheme.typography.headlineLarge)
-                        if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+        HeroPanel {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Eyebrow("Estado actual")
+                    Text(title, style = MaterialTheme.typography.headlineMedium)
+                    if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                StatusOrb(statusIcon(current))
+            }
+            span?.let { (start, end) ->
+                val total = java.time.Duration.between(start, end).toMillis().toFloat()
+                val progress = (java.time.Duration.between(start, now).toMillis() / total).coerceIn(0f, 1f)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp),
+                        color = MaterialTheme.colorScheme.primary, trackColor = TextPrimary.copy(alpha = .12f), gapSize = 0.dp,
+                        drawStopIndicator = {})
+                    Row {
+                        Text(start.format(hourFormat), Modifier.weight(1f), style = MonoLabel, color = TextSecondary)
+                        Text(end.format(hourFormat), style = MonoLabel, color = TextSecondary)
                     }
-                    Image(painterResource(R.drawable.near_clock_cat), contentDescription = null,
-                        modifier = Modifier.size(106.dp))
                 }
-                Button(onClick = { editStatus = true }, enabled = !state.busy) {
-                    Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
+            }
+            Button(onClick = { editStatus = true }, enabled = !state.busy, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp)) {
+                Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado", fontWeight = FontWeight.Bold)
+            }
+            if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
+                Text("Volver al horario", fontWeight = FontWeight.Bold)
+            }
+            inProgress?.let { occurrence ->
+                OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
+                    Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
                 }
-                if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
-                    Text("Volver al horario")
-                }
-                inProgress?.let { occurrence ->
-                    OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
-                        Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
-                    }
-                    if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
-                        title = { Text("¿Terminó ${occurrence.schedule.title}?") },
-                        text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
-                            "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
-                        confirmButton = { Button(onClick = {
-                            confirmEnd = false
-                            actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
-                        }) { Text("Terminar") } },
-                        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
-                }
+                if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
+                    title = { Text("¿Terminó ${occurrence.schedule.title}?") },
+                    text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
+                        "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
+                    confirmButton = { Button(onClick = {
+                        confirmEnd = false
+                        actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
+                    }) { Text("Terminar") } },
+                    dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
             }
         }
     }
-    Text("Mi día", style = MaterialTheme.typography.headlineSmall)
-    next?.let { upcoming ->
-        Text("Próxima en tu horario", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-        Text(upcoming.schedule.title, style = MaterialTheme.typography.titleMedium)
-    }
     val pause = state.pauses.covering(profile?.id, now.toLocalDate())
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Mi día", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+        if (pause == null && today.isNotEmpty()) freeWindow(today.map { it.window.start to it.window.end }, now)?.let { label ->
+            StateChip(label, FreeInk, FreeSurface, dot = false)
+        }
+    }
     if (today.isEmpty()) {
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -612,15 +647,127 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     } else {
         pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
-        today.forEachIndexed { index, occurrence ->
-            ActivityTimelineCard(occurrence.schedule,
-                active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
-                    now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
-                last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
+        // «Ahora» goes before the first activity still to start, or after the last one.
+        val nowIndex = today.indexOfFirst { it.window.start.isAfter(now) }.let { if (it < 0) today.size else it }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            today.forEachIndexed { index, occurrence ->
+                if (index == nowIndex) NowMarker(now)
+                ActivityTimelineCard(occurrence.schedule,
+                    active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
+                        now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
+                    last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
+            }
+            if (nowIndex == today.size && now.toLocalDate() == today.last().window.end.toLocalDate()) NowMarker(now)
         }
         TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
     }
     if (editStatus) StatusEditor(state, actions, status as? UserCurrentStatus.Override) { editStatus = false }
+}
+
+/** The lit card at the top of Hoy and of a contact: a violet gradient with its own border. */
+@Composable
+private fun HeroPanel(content: @Composable ColumnScope.() -> Unit) {
+    NearCard(shape = RoundedCornerShape(24.dp), color = HeroGradient.last(), border = HeroBorder, padding = PaddingValues(0.dp)) {
+        Column(Modifier.fillMaxWidth().background(Brush.linearGradient(HeroGradient)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    }
+}
+
+/** The icon of the current status inside two rings. */
+@Composable
+private fun StatusOrb(icon: ImageVector) {
+    val primary = MaterialTheme.colorScheme.primary
+    Box(Modifier.size(64.dp).border(1.5.dp, primary.copy(alpha = .45f), CircleShape).padding(7.dp)
+        .background(primary.copy(alpha = .18f), CircleShape), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).background(primary.copy(alpha = .9f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+@Composable
+private fun statusIcon(status: UserCurrentStatus): ImageVector = when (status) {
+    is UserCurrentStatus.InClass -> ActivityCategory.fromKey(status.currentSchedule.category, status.currentSchedule.title).icon
+    is UserCurrentStatus.Override -> status.customLocation.lowercase().let { text ->
+        when {
+            "casa" in text && "camino" !in text -> Icons.Default.Home
+            "camino" in text || "calle" in text -> Icons.Default.DirectionsWalk
+            "ocupad" in text -> Icons.Default.DoNotDisturbOn
+            "disponible" in text || "libre" in text -> Icons.Default.WbSunny
+            else -> Icons.Default.Place
+        }
+    }
+    is UserCurrentStatus.FreeTime -> Icons.Default.WbSunny
+    else -> Icons.Default.Info
+}
+
+/** «1h 45m», «35m». */
+private fun compactDuration(minutes: Long): String =
+    if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m".removeSuffix(" 0m") else "${minutes}m"
+
+/**
+ * The free stretch of the day that is going on now, or the next one: «Libre 10:35 – 16:10»,
+ * «Libre hasta 08:00» before the first activity and «Libre desde 21:35» after the last.
+ */
+internal fun freeWindow(busy: List<Pair<ZonedDateTime, ZonedDateTime>>, now: ZonedDateTime): String? {
+    val dayStart = now.toLocalDate().atStartOfDay(now.zone)
+    val gaps = mutableListOf<Pair<ZonedDateTime, ZonedDateTime?>>()
+    var cursor = dayStart
+    busy.sortedBy { it.first }.forEach { (start, end) ->
+        if (start.isAfter(cursor)) gaps += cursor to start
+        if (end.isAfter(cursor)) cursor = end
+    }
+    if (cursor.toLocalDate() == now.toLocalDate()) gaps += cursor to null
+    val (start, end) = gaps.firstOrNull { (_, end) -> end == null || end.isAfter(now) } ?: return null
+    val format = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
+    return when {
+        end == null -> "Libre desde ${start.format(format)}"
+        start == dayStart -> "Libre hasta ${end.format(format)}"
+        else -> "Libre ${start.format(format)} – ${end.format(format)}"
+    }
+}
+
+/**
+ * Someone's day at a glance, from 08:00 to 22:00 in two-hour blocks: rose while busy, green while free,
+ * dimmed once past.
+ */
+@Composable
+private fun DayStrip(schedules: List<ScheduleDto>, zone: ZoneId) {
+    val now = profileClock(zone)
+    val date = now.toLocalDate()
+    val busy = remember(schedules, date, zone) { schedules.occurrencesOn(date, zone).map { it.window } }
+    val free = BrandSky
+    val description = remember(busy, now.hour) {
+        val left = (8 until 22 step 2).count { hour -> date.atTime(hour + 2, 0).atZone(zone).isAfter(now) &&
+            busy.none { it.start.isBefore(date.atTime(hour + 2, 0).atZone(zone)) && it.end.isAfter(date.atTime(hour, 0).atZone(zone)) } }
+        "Hoy le quedan $left bloques libres de dos horas"
+    }
+    Row(Modifier.fillMaxWidth().semantics { contentDescription = description }, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        (8 until 22 step 2).forEach { hour ->
+            val start = date.atTime(hour, 0).atZone(zone)
+            val end = start.plusHours(2)
+            val taken = busy.any { it.start.isBefore(end) && it.end.isAfter(start) }
+            val color = when {
+                !end.isAfter(now) -> CardBorder
+                taken -> BusyInk
+                else -> free
+            }
+            Box(Modifier.weight(1f).height(4.dp).background(color, CircleShape))
+        }
+    }
+}
+
+/** The line of the present moment across the day. */
+@Composable
+private fun NowMarker(now: ZonedDateTime) {
+    val primary = MaterialTheme.colorScheme.primary
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(now.format(hourFormat), Modifier.width(48.dp), style = MonoLabel, color = primary, textAlign = TextAlign.Center)
+        Box(Modifier.size(7.dp).background(primary, CircleShape))
+        Text("Ahora", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = primary)
+        Box(Modifier.weight(1f).height(1.dp).background(primary.copy(alpha = .35f)))
+    }
 }
 
 @Composable
@@ -675,10 +822,19 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
     }
     val date = dates[day - 1]
     PageHeading("", "Horario", "")
-    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it })
-    HorizontalDivider(color = CardBorder)
-    Text(date.longDate().replaceFirstChar { it.titlecase() }, style = MaterialTheme.typography.headlineSmall)
+    WeeklyScheduleHeader(dates, day, onDaySelected = { day = it }, activities = week.map { it.size })
     val occurrences = week[day - 1]
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(date.longDate().replaceFirstChar { it.titlecase() }, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+        val busyMinutes = occurrences.sumOf { occurrence ->
+            java.time.Duration.between(maxOf(date.atStartOfDay(zone), occurrence.window.start),
+                minOf(date.plusDays(1).atStartOfDay(zone), occurrence.window.end)).toMinutes().coerceAtLeast(0)
+        }
+        if (busyMinutes > 0) {
+            val classes = occurrences.all { ActivityCategory.fromKey(it.schedule.category, it.schedule.title) == ActivityCategory.UNIVERSITY }
+            Text("${compactDuration(busyMinutes)} de ${if (classes) "clase" else "actividad"}", style = MonoLabel, color = TextSecondary)
+        }
+    }
     val exceptions = state.schedules.mapNotNull { schedule ->
         schedule.occurrenceExceptions[date.toString()]?.let { schedule to it }
     }.filter { (_, exception) -> !exception.paused && (exception.cancelled || exception.date != date.toString()) }
@@ -709,9 +865,14 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         val end = minOf(dayEnd, occurrence.window.end)
         occupiedUntil?.takeIf { it.isBefore(start) }?.let { gapStart ->
             ScheduleTimeRow(gapStart.format(hourFormat)) {
-                Surface(color = FreeSurface, contentColor = StatusGreenText, shape = RoundedCornerShape(12.dp)) {
-                    Text("Tiempo libre · hasta las ${start.format(hourFormat)}",
-                        Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.labelMedium)
+                Surface(color = FreeSurface, contentColor = FreeInk, shape = RoundedCornerShape(16.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(7.dp).background(FreeInk, CircleShape))
+                        Text("Tiempo libre · hasta ${start.format(hourFormat)}", Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text(compactDuration(java.time.Duration.between(gapStart, start).toMinutes()), style = MonoLabel)
+                    }
                 }
             }
         }
@@ -721,12 +882,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         val category = ActivityCategory.fromKey(schedule.category)
         val reprogrammed = recurring.occurrenceExceptions.containsKey(occurrence.originalDate.toString())
         ScheduleTimeRow(if (occurrence.window.start.isBefore(dayStart)) "Desde ayer" else start.format(hourFormat)) {
-            Surface(shape = RoundedCornerShape(14.dp), color = SlateContainer, contentColor = TextPrimary) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            NearCard(padding = PaddingValues(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 14.dp), spacing = 4.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(category.icon, null, Modifier.size(20.dp), tint = category.accentColor)
+                        Icon(category.icon, null, Modifier.size(18.dp), tint = category.accentColor)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(schedule.title, style = MaterialTheme.typography.titleMedium)
+                            Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             schedule.sourceOwnerId?.let { sourceOwner ->
                                 val sourceName = state.profiles.firstOrNull { it.id == sourceOwner }?.displayName
                                 Text(
@@ -738,7 +898,6 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     Text("Con ajustes personales", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                                 }
                             }
-                            Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                         }
                         var menuOpen by remember(occurrence.originalDate, schedule.id) { mutableStateOf(false) }
                         Box {
@@ -764,12 +923,16 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                             }
                         }
                     }
-                    val activityDetails = listOf(category.label, schedule.modality, schedule.location)
-                        .filter { it.isNotBlank() }.joinToString(" · ")
-                    Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                    if (reprogrammed) StatusPill("Reprogramada", BrandSky)
-                    if (schedule.isOneOff) StatusPill("Solo el ${occurrence.originalDate.longDate()}", BrandSky)
-                }
+                    Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(schedule.timeRangeLabel(day), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        val activityDetails = listOf(category.label, schedule.modality, schedule.location)
+                            .filter { it.isNotBlank() }.joinToString(" · ")
+                        Text(activityDetails, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        if (reprogrammed || schedule.isOneOff) Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (reprogrammed) StateChip("Reprogramada", FreeInk, FreeSurface, dot = false)
+                            if (schedule.isOneOff) StateChip("Solo el ${occurrence.originalDate.longDate()}", FreeInk, FreeSurface, dot = false)
+                        }
+                    }
             }
         }
     }
@@ -816,10 +979,8 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
 
 @Composable
 private fun ScheduleTimeRow(time: String, content: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(time, Modifier.width(55.dp).padding(top = 12.dp), color = TextSecondary,
-            style = MaterialTheme.typography.labelMedium)
-        Box(Modifier.width(1.dp).fillMaxHeight().background(CardBorder))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(time, Modifier.width(50.dp).padding(top = 14.dp), color = TextSecondary, style = MonoLabel)
         Box(Modifier.weight(1f)) { content() }
     }
 }
@@ -922,9 +1083,19 @@ private fun CalendarImportSheet(result: com.example.findme.domain.model.IcsResul
 private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: () -> Unit, onDelete: (SchedulePause) -> Unit) {
     val upcoming = state.pauses.filter { it.userId == state.profile?.id && it.range()?.second?.isBefore(today) == false }
         .sortedBy { it.startDate }
-    Panel {
-        SectionHeading(Icons.Default.BeachAccess, "Pausas del horario", "Vacaciones, feriados o semanas sin clases.")
-        upcoming.forEach { pause ->
+    NearCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
+        Row(Modifier.fillMaxWidth().clickable(enabled = !state.busy, onClickLabel = "Pausar mi horario", onClick = onAdd)
+            .padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            IconBubble(Icons.Default.BeachAccess)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Pausas del horario", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Vacaciones, feriados o semanas sin clases.", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Pausar mi horario", tint = TextSecondary)
+        }
+        if (upcoming.isNotEmpty()) Column(Modifier.padding(start = 16.dp, end = 8.dp, bottom = 8.dp)) {
+          HorizontalDivider(color = CardBorder, modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
+          upcoming.forEach { pause ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(pause.title, fontWeight = FontWeight.SemiBold)
@@ -934,9 +1105,7 @@ private fun SchedulePausesPanel(state: AccountState, today: LocalDate, onAdd: ()
                     Icon(Icons.Default.DeleteOutline, "Quitar la pausa ${pause.title}", tint = TextMuted)
                 }
             }
-        }
-        OutlinedButton(onClick = onAdd, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.BeachAccess, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Pausar mi horario")
+          }
         }
     }
 }
@@ -1325,10 +1494,9 @@ private fun People(state: AccountState, actions: AccountActions) {
     var editingGroup by remember { mutableStateOf<PersonGroup?>(null) }
     if (selectedGroup != null && state.groups.none { it.id == selectedGroup }) selectedGroup = null
     val controls = state.controls
-    PageHeading("", "Personas", "")
-    state.lastSync?.let { updated ->
-        Text("Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-    }
+    PageHeading("", "Personas", "", trailing = state.lastSync?.let { updated ->
+        "Actualizado ${updated.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}"
+    })
     val people = state.connections.mapNotNull { connection ->
         state.profiles.find { it.id == connection.otherPerson(state.profile?.id.orEmpty()) }
     }.sortedBy { controls.nameOf(it).lowercase() }
@@ -1353,31 +1521,37 @@ private fun People(state: AccountState, actions: AccountActions) {
             ChoiceChip("Grupo", false, onClick = { editingGroup = null; groupEditor = true }, enabled = !state.busy,
                 leading = { Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp)) })
         }
-        if (selectedGroup == null) Column {
-            people.forEach { person ->
+        if (selectedGroup == null) NearCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
+            people.forEachIndexed { index, person ->
                 key(person.id) {
+                    val schedules = state.othersSchedules.filter { it.userId == person.id }
                     val status = if (state.selectedPerson?.id == person.id) contactStatus(person, state)
-                    else contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
-                        state.othersStatuses.filter { it.userId == person.id })
+                    else contactStatus(person, state, schedules, state.othersStatuses.filter { it.userId == person.id })
                     val (shown, ink, background) = when (status) {
-                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)
-                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${status.currentSchedule.title}", BusyInk, BusySurface)
-                        is UserCurrentStatus.Override -> Triple(status.customLocation, TextPrimary, AccentContainer)
+                        is UserCurrentStatus.FreeTime -> Triple("Libre ahora", FreeInk, FreeSurface)
+                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${ActivityCategory.fromKey(status.currentSchedule.category,
+                            status.currentSchedule.title).label}", BusyInk, BusySurface)
+                        is UserCurrentStatus.Override -> Triple(status.customLocation, MaterialTheme.colorScheme.primary, AccentContainer)
                         is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
                         is UserCurrentStatus.Loading -> Triple("Consultando…", TextSecondary, InnerBg)
                     }
                     val label = listOfNotNull(shown, status.place).joinToString(" · ")
-                    HorizontalDivider(color = CardBorder)
+                    if (index > 0) HorizontalDivider(color = CardBorder)
                     Row(Modifier.fillMaxWidth().selectable(selected = state.selectedPerson?.id == person.id,
                         enabled = !state.busy, role = Role.RadioButton, onClick = { actions.selectPerson(person) })
-                        .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                        .padding(start = 16.dp, end = 10.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ProfileAvatar(controls.nameOf(person), Modifier.size(48.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(controls.nameOf(person), style = MaterialTheme.typography.titleMedium)
-                            Surface(color = background, contentColor = ink, shape = CircleShape) {
-                                Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelMedium)
+                        ProfileAvatar(controls.nameOf(person), Modifier.size(44.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(controls.nameOf(person), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Spacer(Modifier.weight(1f))
+                                StateChip(label, ink, background, Modifier.widthIn(max = 180.dp),
+                                    dot = status is UserCurrentStatus.FreeTime || status is UserCurrentStatus.InClass)
+                            }
+                            if (state.incomingVisibility[person.id]?.sharesSchedule == true && state.peopleSchedulesFresh) {
+                                DayStrip(schedules, person.zone())
                             }
                         }
                         if (controls.isMuted(person.id)) Icon(Icons.Default.NotificationsOff, "Avisos silenciados",
@@ -1386,7 +1560,6 @@ private fun People(state: AccountState, actions: AccountActions) {
                     }
                 }
             }
-            HorizontalDivider(color = CardBorder)
         }
     }
     OutlinedButton(onClick = { connect = true }, modifier = Modifier.fillMaxWidth()) {
@@ -1416,18 +1589,23 @@ private fun People(state: AccountState, actions: AccountActions) {
             val busy = current is UserCurrentStatus.InClass ||
                 (current is UserCurrentStatus.Override && !current.customLocation.trim().equals("Disponible", ignoreCase = true))
             val watching = state.freeAlerts.any { it.targetId == person.id }
-            Surface(shape = RoundedCornerShape(18.dp), color = FreeSurface, contentColor = StatusGreenText) {
+            Surface(shape = CardShape, color = FreeSurface, contentColor = FreeInk, border = BorderStroke(1.dp, FreeInk.copy(alpha = .18f))) {
                 Row(Modifier.fillMaxWidth().clickable { showAvailability = true }.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.EventAvailable, null)
+                    Box(Modifier.size(38.dp).background(FreeInk.copy(alpha = .12f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center) { Icon(Icons.Default.EventAvailable, null, Modifier.size(19.dp)) }
                     Column(Modifier.weight(1f)) {
-                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium)
+                        Text("Horas libres en común", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text("Ver disponibilidad con ${person.displayName}", style = MaterialTheme.typography.bodySmall)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                 }
             }
-            HeroStatusCard(current) {
+            val personNow = profileClock(person.zone())
+            val upcoming = if (visibility?.sharesSchedule == true && state.peopleSchedulesFresh)
+                state.personSchedules.occurrencesOn(personNow.toLocalDate(), personNow.zone).firstOrNull { it.window.start.isAfter(personNow) }
+                else null
+            HeroStatusCard(current, footer = upcoming?.let { "Próxima actividad: ${it.window.start.format(hourFormat)} · ${it.schedule.title}" }) {
                 Button(onClick = { sendMessage = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -2259,11 +2437,11 @@ private fun AttendanceRow(summary: com.example.findme.attendance.Attendance.Summ
 private fun ProfileHeader(profile: AccountProfile, enabled: Boolean, onEdit: () -> Unit) {
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ProfileAvatar(profile.displayName, Modifier.size(64.dp))
+            ProfileAvatar(profile.displayName, Modifier.size(58.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(profile.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                profile.username?.let { Text("@$it", color = TextSecondary, style = MaterialTheme.typography.bodyMedium) }
+                profile.username?.let { Text("@$it", color = TextSecondary, style = MonoLabel) }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.Public, null, Modifier.size(14.dp), tint = TextMuted)
                     Text(profile.timezone, color = TextMuted, style = MaterialTheme.typography.labelSmall)

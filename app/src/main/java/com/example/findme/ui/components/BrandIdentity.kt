@@ -3,6 +3,7 @@ package com.example.findme.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,10 +62,11 @@ fun BrandWelcome(eyebrow: String, title: String, subtitle: String) {
 
 @Composable
 fun ProfileAvatar(name: String, modifier: Modifier = Modifier) {
-    Box(modifier.size(50.dp).background(
-        Brush.linearGradient(listOf(BrandBlue, BrandSlate)), CircleShape)
-        .padding(2.dp).background(AppSurface, CircleShape), contentAlignment = Alignment.Center) {
-        Text(name.take(1).uppercase(), color = TextPrimary, style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold)
+    // A plain disc with a fine ring: lavender with a violet letter in light, night with a cream letter in dark.
+    Box(modifier.size(50.dp).background(if (IsLightTheme) AccentContainer else InnerBg, CircleShape)
+        .border(1.5.dp, if (IsLightTheme) MaterialTheme.colorScheme.primary.copy(alpha = .25f) else CardBorder, CircleShape),
+        contentAlignment = Alignment.Center) {
+        Text(name.take(1).uppercase(), color = if (IsLightTheme) MaterialTheme.colorScheme.primary else TextPrimary,
+            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     }
 }

@@ -36,7 +36,7 @@ class MonitorUiTest {
             }
         } } }
         compose.onNodeWithText("Sin actividad en curso").assertIsDisplayed()
-        compose.onNodeWithText("Según el horario de hoy. La ubicación no está confirmada.").assertIsDisplayed()
+        compose.onNodeWithText("Según el horario de hoy. La ubicación no se comparte en tiempo real.").assertIsDisplayed()
         screenshot("today-status")
     }
     @Test fun weeklySelectorExposesAllSevenDays() {
@@ -67,7 +67,7 @@ class MonitorUiTest {
         compose.onNodeWithText("Su día, a tu alcance").assertIsDisplayed()
         screenshot("today-designed")
         compose.onNodeWithText("Aula 302 · Campus universitario", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Hasta ${com.example.findme.domain.model.formatScheduleTime(activity.endTime)}").assertIsDisplayed()
+        compose.onNodeWithText("Hasta ${com.example.findme.domain.model.formatScheduleTime(activity.endTime)}", substring = true).assertIsDisplayed()
     }
 
 }
