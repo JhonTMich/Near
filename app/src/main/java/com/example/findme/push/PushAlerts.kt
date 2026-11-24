@@ -9,13 +9,16 @@ import com.example.findme.util.NotificationHelper
 /** [person] is the connected person the alert is about: the sender of a message, or whose status or activity changed. */
 /** [requested] alerts were asked for explicitly, so the alert switches and an open app do not hide them. */
 data class PushAlert(val alert: AccountAlert, val channel: NotificationHelper.Channel, val id: Int, val title: String, val text: String,
-    val person: String, val requested: Boolean = false)
+    val person: String, val requested: Boolean = false,
+    /** Invitations have no local notification equivalent while the account screen is open. */
+    val showWhileVisible: Boolean = false)
 
 object PushAlerts {
     const val STATUS_ENDED = "Vuelve a mostrar su horario."
     const val NOW_FREE = "Ya está libre. Es un buen momento para escribirle."
     fun freeId(personId: String) = "free:$personId".hashCode()
     fun planId(planId: String) = "plan:$planId".hashCode()
+    fun scheduleFollowId(requestId: String) = "schedule-follow:$requestId".hashCode()
 
     fun statusText(location: String, message: String?) =
         listOfNotNull(location.trim(), message?.trim()?.takeIf { it.isNotEmpty() }).joinToString(" · ")
@@ -54,7 +57,7 @@ object PushAlerts {
                 val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
                 val time = Plans.whenText(data["starts_at"] ?: return null, data["ends_at"], java.time.ZoneId.systemDefault())
                 PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Messages, planId(id), "$name te propone un plan",
-                    "$title · $time", person ?: return null)
+                    "$title · $time", person ?: return null, showWhileVisible = true)
             }
             "plan_answer" -> {
                 val id = data["id"] ?: return null
@@ -66,6 +69,25 @@ object PushAlerts {
                     if (accepted) "$title · $time. Ya está en el horario de ambos." else "$title · $time", person ?: return null,
                     requested = true)
             }
+            "schedule_follow" -> {
+                val id = data["id"]?.takeIf { it.isNotBlank() } ?: return null
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Messages, scheduleFollowId(id),
+                    "$name quiere sincronizar tu horario", "Revisa la solicitud en Personas para aceptarla o rechazarla.",
+                    person?.takeIf { it.isNotBlank() } ?: return null, showWhileVisible = true)
+            }
+            "schedule_follow_answer" -> {
+                val id = data["id"]?.takeIf { it.isNotBlank() } ?: return null
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Requested, scheduleFollowId(id),
+                    "$name aceptó la sincronización", "Ya puedes elegir qué actividades de su horario sincronizar.",
+                    person?.takeIf { it.isNotBlank() } ?: return null, requested = true)
+            }
+            "plan_cancelled" -> {
+                val id = data["id"]?.takeIf { it.isNotBlank() } ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Requested, planId(id),
+                    "$name canceló el plan", if (data["was_accepted"] == "true") "$title · Se quitó del horario de ambos."
+                    else "$title · La propuesta ya no está disponible.", person ?: return null, requested = true)
+            }
             else -> null
         }
     }
@@ -75,4 +97,7 @@ object PushAlerts {
         AccountAlert.Statuses -> settings.statuses
         AccountAlert.Messages -> settings.messages
     }
+
+    fun shouldShow(alert: PushAlert, settings: AccountSettings, accountScreenVisible: Boolean) =
+        allowed(alert, settings) && (!accountScreenVisible || alert.requested || alert.showWhileVisible)
 }

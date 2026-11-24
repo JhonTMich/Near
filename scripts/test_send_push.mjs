@@ -84,6 +84,29 @@ test('reuses the Firebase access token between calls', async () => {
   assert.equal(services.calls.filter((call) => call.url === 'https://oauth2.googleapis.com/token').length, 1);
 });
 
+test('delivers plans and synchronization requests through FCM even without a running app', async () => {
+  for (const type of ['plan', 'plan_answer', 'schedule_follow', 'schedule_follow_answer']) {
+    const services = fakeServices({ devices: [{ token: 'device-b', user_id: b }] });
+    const response = await handler(services)(post({ type, recipients: [b], data: { id: 'request-1', user_id: a, name: 'Ana' } }));
+    assert.equal(response.status, 200, type);
+    assert.deepEqual(await response.json(), { sent: 1, removed: 0 }, type);
+    const { message } = JSON.parse(services.calls.find((call) => call.url.includes('fcm.googleapis.com')).init.body);
+    assert.deepEqual(message.data, { type, id: 'request-1', user_id: a, name: 'Ana', recipient_id: b });
+    assert.equal(message.android.priority, 'HIGH');
+  }
+});
+
+test('sends cancellation details to the other participant device', async () => {
+  const services = fakeServices({ devices: [{ token: 'device-b', user_id: b }] });
+  const response = await handler(services)(post({ type: 'plan_cancelled', recipients: [b],
+    data: { id: 'plan-1', user_id: a, name: 'Ana', title: 'Vernos', was_accepted: true } }));
+  assert.deepEqual(await response.json(), { sent: 1, removed: 0 });
+  const { message } = JSON.parse(services.calls.find(call => call.url.includes('fcm.googleapis.com')).init.body);
+  assert.equal(message.data.type, 'plan_cancelled');
+  assert.equal(message.data.was_accepted, 'true');
+  assert.equal(message.data.recipient_id, b);
+});
+
 test('does nothing when nobody has a device', async () => {
   const services = fakeServices();
   assert.deepEqual(await (await handler(services)(post({ type: 'activity', recipients: [a] }))).json(), { sent: 0, removed: 0 });

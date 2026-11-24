@@ -13,10 +13,16 @@ actividades antes de que empiecen (alarmas del teléfono). El envío requiere qu
 | Antes de tus actividades | 10 min, 30 min o 1 h antes de cada actividad tuya | Alarma local, sin red |
 | Ya está libre | Pediste «Avísame cuando esté libre» y esa persona terminó su actividad o estado | Push (pg_cron cada minuto) |
 | Planes | Te proponen un plan, o responden al que propusiste | Push (disparador) |
+| Sincronización de horarios | Te solicitan sincronizar tu horario, o aceptan tu solicitud | Push (disparador) |
 
 - Cada aviso de tu gente solo llega si esa persona comparte esa información contigo y no la silenciaste.
 - Los interruptores de Perfil → Notificaciones se aplican en el teléfono: el servidor envía avisos de
-  datos y la app decide si mostrarlos. Con Near en pantalla, la propia app avisa y el push se ignora.
+  datos y la app decide si mostrarlos. Con Near en pantalla, los mensajes y cambios de actividad o
+  estado usan sus avisos locales. Las propuestas de planes y solicitudes de sincronización también
+  muestran el push con la app abierta, porque no tienen un aviso local que lo reemplace.
+- Las solicitudes y propuestas recibidas respetan el silencio del contacto y el interruptor de mensajes.
+  Las respuestas a planes o sincronizaciones que pediste se muestran como «Avisos que pediste».
+  Ambos eventos actualizan Personas en tiempo real.
 - El recordatorio está apagado por defecto. Llega a la hora exacta si Android permite alarmas exactas;
   si no, puede retrasarse unos minutos (la app ofrece permitirlas).
 
@@ -51,10 +57,17 @@ igual, pero solo se ve la notificación con sus botones.
 - `supabase/migrations/20261117220000_secreto_avisos_push.sql`: genera en Vault el secreto compartido y
   la URL de la función.
 - `supabase/functions/send-push`: firma con la cuenta de servicio de Firebase y envía por la API v1 de FCM.
+- `supabase/migrations/20261124153547_avisos_sincronizacion_y_planes_en_vivo.sql`: push para solicitudes
+  y aprobaciones de sincronización; publicación de planes y solicitudes en Realtime.
 
 ## Despliegue (una vez)
 
 El proyecto FindMeDB ya tiene las tres migraciones de push. Despliega la versión de `send-push` de esta rama antes de publicar el APK, porque el cliente valida el destinatario que incluye cada aviso.
+
+Para los avisos de sincronización, despliega primero `send-push` con los tipos `schedule_follow` y
+`schedule_follow_answer`; después aplica la migración `20261124153547` y publica el APK de esta rama.
+La función anterior rechaza esos tipos, y un APK anterior no sabe mostrarlos. La migración también
+habilita las actualizaciones en vivo de planes y solicitudes; los mensajes existentes no se reenvían.
 
 Usa el registro existente de `com.example.near` en el proyecto Firebase `near-c8d8c`. Descarga su
 `google-services.json` y guárdalo en `app/google-services.json` para compilar localmente. En GitHub,
