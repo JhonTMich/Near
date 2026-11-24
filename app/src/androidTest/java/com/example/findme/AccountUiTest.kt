@@ -68,7 +68,7 @@ class AccountUiTest {
         screenshot("brand-my-day", composeOnly = true)
         compose.onNodeWithTag("near-tab-Horario").performClick()
         compose.onNodeWithTag("near-heading-Horario").assertIsDisplayed()
-        compose.onNodeWithText("Tiempo libre · hasta las 14:00").assertExists()
+        compose.onNodeWithText("Tiempo libre · hasta 14:00").assertExists()
         screenshot("brand-schedule", composeOnly = true)
         compose.onNodeWithTag("near-tab-Personas").performClick()
         compose.onNodeWithTag("near-heading-Personas").assertIsDisplayed()
@@ -426,7 +426,8 @@ class AccountUiTest {
         org.junit.Assume.assumeTrue(local.plusMinutes(30).toLocalDate() == local.toLocalDate())
         val current = mutableStateOf(state.copy(schedules = listOf(future)))
         compose.setContent { NearTheme { AccountContent(current.value, object : AccountActions {}) } }
-        compose.onNodeWithText("Próxima en tu horario").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Siguiente actividad de prueba").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Ahora").assertExists()
         compose.onNodeWithText("Nada más por hoy").assertDoesNotExist()
         screenshot("blue-today-next", composeOnly = true)
         compose.onNodeWithText("Ver horario").performScrollTo().performClick()

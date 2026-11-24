@@ -24,30 +24,43 @@ data class NearPalette(
     /** The arched panel under the sign-in forms. */
     val loginPanel: Color,
     val freeSurface: Color, val busySurface: Color, val busyInk: Color,
+    /** Text on [freeSurface]: the mint pills and the free-time bars. */
+    val freeInk: Color,
+    /** The bands of the top bar and the bottom navigation. */
+    val bar: Color,
+    /** The violet glow that lights the top of every screen. */
+    val glow: Color,
+    val heroBorder: Color,
+    /** Light cards float on a soft shadow; dark ones only need their border. */
+    val isLight: Boolean,
 )
 
 val DarkPalette = NearPalette(
-    accent = Color(0xFFB9A0FA), sky = Color(0xFFDBECA7), slate = Color(0xFFCEB7EF), orange = Color(0xFFECC48F),
-    background = Color(0xFF1C1824), surface = Color(0xFF25202E), card = Color(0xFF30283C),
-    cardBorder = Color(0xFF51445E), inner = Color(0xFF3B3049),
-    textPrimary = Color(0xFFF7F0E5), textSecondary = Color(0xFFD7CBDE), textMuted = Color(0xFFB7A9C3),
-    accentContainer = Color(0xFF44335E), skyContainer = Color(0xFF303B28), slateContainer = Color(0xFF3E304F),
-    heroGradient = listOf(Color(0xFF44335E), Color(0xFF382946)),
-    statusGreen = Color(0xFFDAEDA0), university = Color(0xFFB4CCF5),
-    loginPanel = Color(0xFF25202E),
-    freeSurface = Color(0xFF303B28), busySurface = Color(0xFF4D3038), busyInk = Color(0xFFFFB7A9),
+    accent = Color(0xFFC8B5FF), sky = Color(0xFF9BE3A8), slate = Color(0xFFCDB8F5), orange = Color(0xFFF0C48E),
+    background = Color(0xFF14121C), surface = Color(0xFF1C1928), card = Color(0xFF1F1B2C),
+    cardBorder = Color(0xFF353049), inner = Color(0xFF282338),
+    textPrimary = Color(0xFFF4F1FA), textSecondary = Color(0xFFCAC3DB), textMuted = Color(0xFF9D96B2),
+    accentContainer = Color(0xFF3A2F5E), skyContainer = Color(0xFF233A2B), slateContainer = Color(0xFF2A2440),
+    heroGradient = listOf(Color(0xFF3D3063), Color(0xFF2B2445)),
+    statusGreen = Color(0xFF8EE09C), university = Color(0xFFC8B5FF),
+    loginPanel = Color(0xFF1C1928),
+    freeSurface = Color(0xFFCDEFD1), busySurface = Color(0xFFFFD7DD), busyInk = Color(0xFFC42B46),
+    freeInk = Color(0xFF1C6232), bar = Color(0xFF1A1724), glow = Color(0xFF3A2A66),
+    heroBorder = Color(0xFF51437E), isLight = false,
 )
 
 val LightPalette = NearPalette(
-    accent = Color(0xFF6547C7), sky = Color(0xFF3B541A), slate = Color(0xFF654695), orange = Color(0xFF88511D),
-    background = Color(0xFFF6F2E9), surface = Color(0xFFFFFBF4), card = Color(0xFFFFFBF4),
-    cardBorder = Color(0xFFD7CBD9), inner = Color(0xFFF0E8F2),
-    textPrimary = Color(0xFF282137), textSecondary = Color(0xFF554963), textMuted = Color(0xFF675B72),
-    accentContainer = Color(0xFFE7D9F6), skyContainer = Color(0xFFE0EDAE), slateContainer = Color(0xFFEBDDF5),
-    heroGradient = listOf(Color(0xFFDFC9F1), Color(0xFFEADBF5)),
-    statusGreen = Color(0xFF344B12), university = Color(0xFF355D8B),
-    loginPanel = Color(0xFFFFFBF4),
-    freeSurface = Color(0xFFE0EDAE), busySurface = Color(0xFFF6D6CE), busyInk = Color(0xFF812D29),
+    accent = Color(0xFF5B3FD1), sky = Color(0xFF2E7D3D), slate = Color(0xFF6A4CC9), orange = Color(0xFF9A5A16),
+    background = Color(0xFFF5F3FB), surface = Color(0xFFFBFAFF), card = Color(0xFFFFFFFF),
+    cardBorder = Color(0xFFE9E4F4), inner = Color(0xFFF3F0FB),
+    textPrimary = Color(0xFF1E1A2D), textSecondary = Color(0xFF5B556D), textMuted = Color(0xFF857F98),
+    accentContainer = Color(0xFFE7DFFD), skyContainer = Color(0xFFDDF3DF), slateContainer = Color(0xFFF1ECFD),
+    heroGradient = listOf(Color(0xFFE9E0FD), Color(0xFFDCD0F8)),
+    statusGreen = Color(0xFF2E8B40), university = Color(0xFF5B3FD1),
+    loginPanel = Color(0xFFFBFAFF),
+    freeSurface = Color(0xFFE0F4E1), busySurface = Color(0xFFFDE1E5), busyInk = Color(0xFFC42B46),
+    freeInk = Color(0xFF256B34), bar = Color(0xFFFBFAFF), glow = Color(0xFFE4DAFC),
+    heroBorder = Color(0xFFD8CCF6), isLight = true,
 )
 
 val LocalNearPalette = staticCompositionLocalOf { DarkPalette }
@@ -83,3 +96,8 @@ val AccentWork: Color @Composable @ReadOnlyComposable get() = palette.slate
 val FreeSurface: Color @Composable @ReadOnlyComposable get() = palette.freeSurface
 val BusySurface: Color @Composable @ReadOnlyComposable get() = palette.busySurface
 val BusyInk: Color @Composable @ReadOnlyComposable get() = palette.busyInk
+val FreeInk: Color @Composable @ReadOnlyComposable get() = palette.freeInk
+val BarBg: Color @Composable @ReadOnlyComposable get() = palette.bar
+val BackdropGlow: Color @Composable @ReadOnlyComposable get() = palette.glow
+val HeroBorder: Color @Composable @ReadOnlyComposable get() = palette.heroBorder
+val IsLightTheme: Boolean @Composable @ReadOnlyComposable get() = palette.isLight

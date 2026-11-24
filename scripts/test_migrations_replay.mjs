@@ -34,7 +34,7 @@ try {
     applied++;
   }
   const tables = (await db.query(`select string_agg(tablename, ',' order by tablename) t from pg_tables where schemaname='public'`)).rows[0].t;
-  assert.equal(tables, 'account_profiles,activity_attendance,connection_invitations,connection_preferences,connection_signals,followed_schedule_activities,free_alerts,person_connections,person_group_members,person_groups,personal_schedule,personal_status,plan_proposals,push_tokens,quick_messages,schedule_follow_requests,schedule_pauses,signup_allowed_emails');
+  assert.equal(tables, 'account_profiles,activity_attendance,connection_invitations,connection_preferences,connection_signals,current_place,followed_schedule_activities,free_alerts,person_connections,person_group_members,person_groups,personal_schedule,personal_status,plan_proposals,push_tokens,quick_messages,schedule_follow_requests,schedule_pauses,signup_allowed_emails');
   const limiter = (await db.query(`select count(*) n from pg_proc where proname='consume_username_login_attempt' and pronargs=2`)).rows[0].n;
   assert.equal(Number(limiter), 1, 'Latest limiter signature is installed');
   console.log(`Migrations replay: ${applied} of ${files.length} migrations applied in order (pg_cron migrations skipped).`);

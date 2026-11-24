@@ -175,7 +175,9 @@ class AccountRepository {
         }.decodeSingle<ScheduleDto>()
 
     suspend fun schedules(id: String) = readSchedules(id)
-    suspend fun overrides(id: String) = client.postgrest["personal_status"].select { filter { eq("user_id", id) } }.decodeList<StatusOverrideDto>()
+    /** The shared status of [id] and, from `current_place`, where they are now. */
+    suspend fun overrides(id: String) = client.postgrest["personal_status"].select { filter { eq("user_id", id) } }
+        .decodeList<StatusOverrideDto>() + readPlaces(id)
     suspend fun accessibleSchedules() = readSchedules(null)
 
     private suspend fun readSchedules(owner: String?): List<ScheduleDto> {
@@ -189,7 +191,16 @@ class AccountRepository {
             read("personal_schedule")
         }
     }
-    suspend fun accessibleStatuses() = client.postgrest["personal_status"].select().decodeList<StatusOverrideDto>()
+    suspend fun accessibleStatuses() = client.postgrest["personal_status"].select().decodeList<StatusOverrideDto>() + readPlaces(null)
+
+    /** Places are read apart so a server without `current_place` yet still shows statuses. */
+    private suspend fun readPlaces(owner: String?): List<StatusOverrideDto> = try {
+        client.postgrest["current_place"].select { if (owner != null) filter { eq("user_id", owner) } }
+            .decodeList<CurrentPlaceDto>().map { it.asStatus() }
+    } catch (error: PostgrestRestException) {
+        if (error.code != "PGRST205" && error.code != "42P01") throw error
+        emptyList()
+    }
 
     suspend fun saveSchedules(activities: List<ScheduleDto>): List<ScheduleDto> {
         val ownerId = userId()
@@ -344,6 +355,19 @@ class AccountRepository {
 
     suspend fun clearStatus() {
         client.postgrest["personal_status"].delete { filter { eq("user_id", userId()) } }
+    }
+
+    /** Where you are now («En casa»): shown next to your activity or status, never instead of it. */
+    suspend fun setPlace(label: String, minutes: Long) {
+        require(label.trim().length in 1..60)
+        require(minutes in 1..4320)
+        val id = userId()
+        client.postgrest["current_place"].upsert(CurrentPlaceDto(id, label.trim(),
+            Instant.now().plusSeconds(minutes * 60).toString()))
+    }
+
+    suspend fun clearPlace() {
+        client.postgrest["current_place"].delete { filter { eq("user_id", userId()) } }
     }
 
     suspend fun createInvitation(): ConnectionInvitation {

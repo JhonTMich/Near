@@ -44,7 +44,9 @@ val mapsApiKey = (providers.environmentVariable("MAPS_API_KEY").orNull?.takeIf {
 
 android {
     namespace = "com.example.findme"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 1 }
+    }
 
     defaultConfig {
         applicationId = publishedApplicationId
