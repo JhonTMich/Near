@@ -86,7 +86,8 @@ class AutoPlaceSheetTest {
         compose.setContent { NearTheme { AutoPlaceSheet(state.value, actions) { dismissed = true } } }
         compose.onNodeWithText("Guardar lugar").performScrollTo().performClick()
         compose.onNodeWithText("No pudimos saber dónde estás.").assertExists()
-        compose.onNodeWithText("Guardar lugar").assertIsEnabled().performClick()
+        // The new validation message can move the button below the visible part of the sheet.
+        compose.onNodeWithText("Guardar lugar").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(2, saves); assertFalse(dismissed) }
     }
 }
