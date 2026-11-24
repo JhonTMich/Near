@@ -15,9 +15,9 @@ sealed interface UserCurrentStatus {
         val customMessage: String?,
         val expiresAt: String,
         val concurrentVirtualClass: ScheduleDto? = null,
-        override val place: String? = null,
         override val selectedDayOfWeek: Int,
-        override val todaySchedules: List<ScheduleDto>
+        override val todaySchedules: List<ScheduleDto>,
+        override val place: String? = null
     ) : UserCurrentStatus
 
     data class InClass(
@@ -25,16 +25,16 @@ sealed interface UserCurrentStatus {
         val currentSchedule: ScheduleDto,
         val remainingMinutes: Long,
         val progress: Float, // 0.0f to 1.0f
-        override val place: String? = null,
         override val selectedDayOfWeek: Int,
-        override val todaySchedules: List<ScheduleDto>
+        override val todaySchedules: List<ScheduleDto>,
+        override val place: String? = null
     ) : UserCurrentStatus
 
     data class FreeTime(
         override val displayName: String,
-        override val place: String? = null,
         override val selectedDayOfWeek: Int,
-        override val todaySchedules: List<ScheduleDto>
+        override val todaySchedules: List<ScheduleDto>,
+        override val place: String? = null
     ) : UserCurrentStatus
 
     data class Loading(
