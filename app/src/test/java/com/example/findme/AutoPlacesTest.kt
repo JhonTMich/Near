@@ -25,10 +25,10 @@ class AutoPlacesTest {
 
     @Test fun aPlaceAlreadySharedIsOnlySentAgainOnceADay() {
         assertEquals(Change.Nothing, desired(listOf("home"), marker = "home"))
-        assertEquals(Change.Nothing, desired(listOf("uni", "home"), marker = "uni"))
+        assertEquals(Change.Nothing, desired(listOf("home", "uni"), marker = "uni"))
         assertEquals(Change.Nothing, desired(emptyList(), marker = AutoPlaces.STREET_MARKER, street = street))
         // Shared over a day ago: sent again so it does not expire while the phone stays there.
-        assertEquals(Change.Share("En la universidad", "uni"), desired(listOf("uni", "home"), marker = "uni", stale = true))
+        assertEquals(Change.Share("En la universidad", "uni"), desired(listOf("home", "uni"), marker = "uni", stale = true))
         assertEquals(street, desired(emptyList(), marker = AutoPlaces.STREET_MARKER, street = street, stale = true))
     }
 
@@ -44,6 +44,28 @@ class AutoPlacesTest {
         assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = "uni"))
         // Inside both, the latest place entered wins.
         assertEquals(Change.Share("En la universidad", "uni"), desired(listOf("home", "uni"), marker = null))
+    }
+
+    @Test fun enteringWorkReplacesHomeEvenWhenItsExitWasMissed() {
+        val work = AutoPlace("work", "En el trabajo", -12.06, -77.05)
+        assertEquals(Change.Share("En el trabajo", "work"),
+            AutoPlaces.desired(listOf(home, work), listOf("home", "work"), "home", Change.Nothing))
+        // The late home exit must keep the work status; another arrival at home can replace it.
+        assertEquals(Change.Nothing,
+            AutoPlaces.desired(listOf(home, work), listOf("work"), "work", Change.Nothing))
+        assertEquals(Change.Share("En casa", "home"),
+            AutoPlaces.desired(listOf(home, work), listOf("work", "home"), "work", Change.Nothing))
+    }
+
+    @Test fun aFreshFixOutsideHomeClearsItsStatusWithoutAWorkGeofence() {
+        val inside = AutoPlaces.detectedPlaces(listOf(home)) { home.radius + 1 }
+        assertTrue(inside.isEmpty())
+        assertEquals(Change.Clear, AutoPlaces.desired(listOf(home), inside.toList(), "home", Change.Nothing))
+    }
+
+    @Test fun overlappingZonesChooseTheNearestInsteadOfThePreviouslySharedPlace() {
+        val inside = AutoPlaces.detectedPlaces(places) { if (it.id == home.id) 140f else 20f }
+        assertEquals(Change.Share("En la universidad", "uni"), desired(inside.toList(), marker = "home"))
     }
 
     @Test fun placesRoundTripAndBadDataIsIgnored() {
