@@ -763,11 +763,15 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun loadAutoPlaces(owner: String) {
         val places = runCatching { com.example.findme.places.AutoPlaces.places(getApplication(), owner) }.getOrDefault(emptyList())
         if (repository.auth.currentUserOrNull()?.id == owner) _state.update { it.copy(autoPlaces = places) }
+        // Opening the app is enough to move a place an older version saved as your status.
+        runCatching { com.example.findme.places.AutoPlaces.moveLegacyStatus(getApplication(), owner) }
         runCatching { com.example.findme.places.AutoPlaces.register(getApplication(), owner) }
     }
     /** Saved places are home addresses and the like: they do not outlive the session on this phone. */
     private suspend fun forgetAutoPlaces(owner: String? = repository.auth.currentUserOrNull()?.id) {
         owner ?: return
+        // While the session exists (signing out): nobody should keep seeing where you were.
+        runCatching { repository.clearPlace() }
         runCatching {
             com.example.findme.places.AutoPlaces.places(getApplication(), owner).forEach {
                 com.example.findme.places.AutoPlaces.remove(getApplication(), owner, it.id)
@@ -867,14 +871,14 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         publishWidgetSnapshot()
     }
     override fun setStatus(text: String, minutes: Long) = perform {
+        // First, so removing a place saved as a status by an older version cannot remove this one.
+        com.example.findme.places.AutoPlaces.moveLegacyStatus(getApplication(), repository.userId())
         repository.setStatus(text, minutes)
-        // A status chosen by hand is not removed when leaving a saved place.
-        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Estado actualizado.")
     }
     override fun clearStatus() = perform {
+        com.example.findme.places.AutoPlaces.moveLegacyStatus(getApplication(), repository.userId())
         repository.clearStatus()
-        com.example.findme.places.AutoPlaces.forgetAutomaticStatus(getApplication(), repository.userId())
         refreshAfterSave("Se muestra tu horario de nuevo.")
     }
     override fun invite() = perform {

@@ -11,37 +11,37 @@ class AutoPlacesTest {
 
     private val uni = AutoPlace("uni", "En la universidad", -12.07, -77.08, 500f)
     private val places = listOf(home, uni)
-    private val street = Change.Street(60)
+    private val street = Change.Street(AutoPlaces.PLACE_MINUTES)
 
-    private fun desired(inside: List<String>, marker: String?, manual: Boolean = false, entered: Boolean = true,
-        street: Change = Change.Nothing) = AutoPlaces.desired(places, inside, marker, manual, entered, street)
+    private fun desired(inside: List<String>, marker: String?, street: Change = Change.Nothing, stale: Boolean = false) =
+        AutoPlaces.desired(places, inside, marker, street, stale)
 
-    @Test fun arrivingSharesThePlaceUnlessAStatusWasSetByHand() {
+    @Test fun arrivingSharesThePlace() {
         assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = null))
-        assertEquals(Change.Nothing, desired(listOf("home"), marker = null, manual = true))
-        // Arriving home from «En la calle» or from another place replaces that automatic status.
+        // Arriving home from «En la calle» or from another place replaces it.
         assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = AutoPlaces.STREET_MARKER))
         assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = "uni"))
     }
 
-    @Test fun aStatusAlreadySharedIsNotSentAgain() {
+    @Test fun aPlaceAlreadySharedIsOnlySentAgainOnceADay() {
         assertEquals(Change.Nothing, desired(listOf("home"), marker = "home"))
         assertEquals(Change.Nothing, desired(listOf("uni", "home"), marker = "uni"))
+        assertEquals(Change.Nothing, desired(emptyList(), marker = AutoPlaces.STREET_MARKER, street = street))
+        // Shared over a day ago: sent again so it does not expire while the phone stays there.
+        assertEquals(Change.Share("En la universidad", "uni"), desired(listOf("uni", "home"), marker = "uni", stale = true))
+        assertEquals(street, desired(emptyList(), marker = AutoPlaces.STREET_MARKER, street = street, stale = true))
     }
 
-    @Test fun leavingUpdatesTheStatusEvenIfTheEarlierAttemptFailed() {
-        // Left the university: «En la calle» when it is on, otherwise the place's status is removed.
-        assertEquals(street, desired(emptyList(), marker = "uni", entered = false, street = street))
-        assertEquals(Change.Clear, desired(emptyList(), marker = "uni", entered = false))
-        // A retry after the status was already removed changes nothing.
-        assertEquals(Change.Nothing, desired(emptyList(), marker = null, entered = false))
-        assertEquals(Change.Nothing, desired(emptyList(), marker = null, manual = true, entered = false))
+    @Test fun leavingUpdatesThePlaceEvenIfTheEarlierAttemptFailed() {
+        // Left the university: «En la calle» when it is on, otherwise the place is removed.
+        assertEquals(street, desired(emptyList(), marker = "uni", street = street))
+        assertEquals(Change.Clear, desired(emptyList(), marker = "uni"))
+        // A retry after the place was already removed changes nothing.
+        assertEquals(Change.Nothing, desired(emptyList(), marker = null))
     }
 
     @Test fun leavingOnePlaceWhileInAnotherSharesTheOther() {
-        assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = "uni", entered = false))
-        // A status removed by hand stays removed.
-        assertEquals(Change.Nothing, desired(listOf("home"), marker = null, entered = false))
+        assertEquals(Change.Share("En casa", "home"), desired(listOf("home"), marker = "uni"))
         // Inside both, the latest place entered wins.
         assertEquals(Change.Share("En la universidad", "uni"), desired(listOf("home", "uni"), marker = null))
     }

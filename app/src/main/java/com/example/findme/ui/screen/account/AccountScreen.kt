@@ -557,7 +557,7 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
             ).joinToString(" · ")
             is UserCurrentStatus.Error -> current.message
             is UserCurrentStatus.Loading -> ""
-        }
+        }.let { text -> listOfNotNull(current.place, text.takeIf { it.isNotBlank() }).joinToString(" · ") }
         Surface(shape = RoundedCornerShape(22.dp), color = AccentContainer, contentColor = TextPrimary) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -1359,13 +1359,14 @@ private fun People(state: AccountState, actions: AccountActions) {
                     val status = if (state.selectedPerson?.id == person.id) contactStatus(person, state)
                     else contactStatus(person, state, state.othersSchedules.filter { it.userId == person.id },
                         state.othersStatuses.filter { it.userId == person.id })
-                    val (label, ink, background) = when (status) {
+                    val (shown, ink, background) = when (status) {
                         is UserCurrentStatus.FreeTime -> Triple("Libre ahora", StatusGreenText, FreeSurface)
                         is UserCurrentStatus.InClass -> Triple("Ocupado · ${status.currentSchedule.title}", BusyInk, BusySurface)
                         is UserCurrentStatus.Override -> Triple(status.customLocation, TextPrimary, AccentContainer)
                         is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
                         is UserCurrentStatus.Loading -> Triple("Consultando…", TextSecondary, InnerBg)
                     }
+                    val label = listOfNotNull(shown, status.place).joinToString(" · ")
                     HorizontalDivider(color = CardBorder)
                     Row(Modifier.fillMaxWidth().selectable(selected = state.selectedPerson?.id == person.id,
                         enabled = !state.busy, role = Role.RadioButton, onClick = { actions.selectPerson(person) })
@@ -1619,7 +1620,7 @@ private fun GroupPanel(group: PersonGroup, state: AccountState, actions: Account
                 is UserCurrentStatus.InClass -> status.currentSchedule.title to ActivityCategory.fromKey(status.currentSchedule.category).accentColor
                 is UserCurrentStatus.Error -> status.message to TextMuted
                 else -> "Libre" to TextMuted
-            }
+            }.let { (text, ink) -> listOfNotNull(text, status.place).joinToString(" · ") to ink }
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { actions.selectPerson(person) }
                 .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ProfileAvatar(state.controls.nameOf(person), Modifier.size(36.dp))
@@ -2082,13 +2083,12 @@ private fun AutoPlacesPanel(state: AccountState, actions: AccountActions) {
         }
         if (state.autoPlaces.isNotEmpty() && !location) Text("Near ya no tiene permiso de ubicación; los lugares están en pausa.",
             color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        Text("Un estado que compartas a mano no se reemplaza ni se quita al llegar o salir.", color = TextMuted,
+        Text("Tu lugar se ve junto a tu actividad o tu estado, sin reemplazarlos.", color = TextMuted,
             style = MaterialTheme.typography.bodySmall)
         if (state.autoPlaces.isNotEmpty()) {
             HorizontalDivider(color = CardBorder)
             AccountSettingsSwitch("«${com.example.findme.places.AutoPlaces.STREET}» fuera de tus lugares",
-                "Al salir de todos tus lugares lo compartimos, salvo durante tus actividades: entonces se ve tu horario. " +
-                    "Tu gente sabrá cuándo estás fuera.", state.settings.streetStatus) { actions.setStreetStatus(it) }
+                "Al salir de todos tus lugares lo mostramos junto a tu actividad. Tu gente sabrá cuándo estás fuera.", state.settings.streetStatus) { actions.setStreetStatus(it) }
         }
         if (state.autoPlaces.size < com.example.findme.places.AutoPlaces.MAX) OutlinedButton(onClick = {
             if (location) adding = true
