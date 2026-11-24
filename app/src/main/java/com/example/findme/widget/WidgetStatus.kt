@@ -79,7 +79,7 @@ fun widgetStatus(name: String, schedules: List<ScheduleDto>, statuses: List<Stat
                 start.format(java.time.format.DateTimeFormatter.ofPattern("EEE ", java.util.Locale.forLanguageTag("es")))
         "${schedule.title} · $day${formatScheduleTime(schedule.startTime)}"
     } ?: "Libre · de relajo"
-    return when (state) {
+    return placed(state.place, when (state) {
         is UserCurrentStatus.InClass -> {
             val schedule = state.currentSchedule
             val end = schedule.activeWindow(now)?.end
@@ -93,5 +93,9 @@ fun widgetStatus(name: String, schedules: List<ScheduleDto>, statuses: List<Stat
             state.customMessage?.takeIf { it.isNotBlank() } ?: "Estado compartido", next,
             sceneForSharedStatus("${state.customLocation} ${state.customMessage.orEmpty()}"), "Estado compartido", shared = true)
         else -> WidgetStatus("Libre", "Sin actividad", next, WidgetScene.FREE, "Tiempo libre", free = true)
-    }
+    })
 }
+
+/** The current place goes first in the detail («En casa · Sin actividad»), never instead of the status. */
+private fun placed(place: String?, status: WidgetStatus) =
+    if (place == null) status else status.copy(detail = "$place · ${status.detail}")

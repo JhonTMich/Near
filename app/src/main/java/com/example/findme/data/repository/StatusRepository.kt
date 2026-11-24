@@ -29,20 +29,19 @@ object StatusRepository {
         val daySchedules = (if (selectedDate == today) currentOccurrences
             else schedules.occurrencesOn(selectedDate, nowInLima.zone)).map { it.schedule }
 
-        // Find an unexpired manual status.
-        val activeOverride = overrides
-            .filter { it.isActive }
-            .firstOrNull { overrideDto ->
-                val expiresInstant = parseIsoToInstant(overrideDto.expiresAt)
-                expiresInstant != null && expiresInstant.isAfter(nowInLima.toInstant())
-            }
+        val current = overrides.filter { overrideDto ->
+            overrideDto.isActive && parseIsoToInstant(overrideDto.expiresAt)?.isAfter(nowInLima.toInstant()) == true
+        }
+        // Find an unexpired manual status; the current place only goes next to it or to the schedule.
+        val activeOverride = current.firstOrNull { !it.isPlace }
+        val place = current.firstOrNull { it.isPlace }?.customLocation?.trim()?.takeIf { it.isNotEmpty() }
 
         val active = currentOccurrences.firstOrNull { !nowInLima.isBefore(it.window.start) && nowInLima.isBefore(it.window.end) }
 
         // Account users can explicitly share a change of plans, even during a scheduled activity.
         if (activeOverride != null) {
             return UserCurrentStatus.Override(displayName, activeOverride.customLocation, activeOverride.customMessage,
-                activeOverride.expiresAt, selectedDayOfWeek = selectedDayOfWeek, todaySchedules = daySchedules)
+                activeOverride.expiresAt, place = place, selectedDayOfWeek = selectedDayOfWeek, todaySchedules = daySchedules)
         }
 
         // An activity is active from its start time (inclusive) until its end (exclusive).
@@ -61,6 +60,7 @@ object StatusRepository {
                 currentSchedule = currentSchedule,
                 remainingMinutes = remainingMin,
                 progress = progress,
+                place = place,
                 selectedDayOfWeek = selectedDayOfWeek,
                 todaySchedules = daySchedules
             )
@@ -68,6 +68,7 @@ object StatusRepository {
 
         // No scheduled activity or active announcement.
         return UserCurrentStatus.FreeTime(
+            place = place,
             displayName = displayName,
             selectedDayOfWeek = selectedDayOfWeek,
             todaySchedules = daySchedules

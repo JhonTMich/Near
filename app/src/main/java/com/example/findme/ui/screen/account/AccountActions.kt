@@ -60,7 +60,7 @@ interface AccountActions {
     fun refreshAttendance() {}
     /** Marks one date by hand: attended, missed, or null to go back to how Near counts it by itself. */
     fun markAttendance(scheduleId: String, date: String, present: Boolean?) {}
-    /** Shares «En la calle» outside every saved place when there is no activity in progress. */
+    /** Shares «En la calle» as your place outside every saved place, next to your activity. */
     fun setStreetStatus(enabled: Boolean) {}
     fun removeAutoPlace(id: String) {}
     fun refreshAutoPlaces() {}

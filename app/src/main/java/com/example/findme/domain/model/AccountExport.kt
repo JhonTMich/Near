@@ -54,8 +54,13 @@ object AccountExport {
                 }
             }
             putJsonArray("shared_status") {
-                statuses.filter { it.userId == profile.id }.forEach { status ->
+                statuses.filter { it.userId == profile.id && !it.isPlace }.forEach { status ->
                     addJsonObject { put("text", status.customLocation); put("message", status.customMessage); put("expires_at", status.expiresAt) }
+                }
+            }
+            putJsonArray("current_place") {
+                statuses.filter { it.userId == profile.id && it.isPlace }.forEach { place ->
+                    addJsonObject { put("label", place.customLocation); put("expires_at", place.expiresAt) }
                 }
             }
             putJsonArray("quick_messages") {

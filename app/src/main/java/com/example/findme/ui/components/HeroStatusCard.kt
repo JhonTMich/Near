@@ -66,14 +66,14 @@ fun HeroStatusCard(
                     else -> "Sin actividad en curso"
                 }
                 Text(title, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-.6).sp, color = TextPrimary)
-                Text(when (status) {
+                Text(listOfNotNull(status.place, when (status) {
                     is UserCurrentStatus.InClass -> listOf(status.currentSchedule.location,
                         "Termina en ${formatDurationMinutes(status.remainingMinutes)}").filter { it.isNotBlank() }.joinToString(" · ")
                     is UserCurrentStatus.Override -> status.customMessage ?: "Al terminar este estado, se mostrará el horario."
                     is UserCurrentStatus.Loading -> "Preparando la información de hoy"
                     is UserCurrentStatus.Error -> status.message
-                    else -> "Según el horario de hoy. La ubicación no está confirmada."
-                }, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    else -> if (status.place != null) "Según el horario de hoy" else "Según el horario de hoy. La ubicación no está confirmada."
+                }).joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                 if (status is UserCurrentStatus.InClass) {
                     val progress by animateFloatAsState(status.progress.coerceIn(0f, 1f), tween(800), label = "activityProgress")
                     LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp),
