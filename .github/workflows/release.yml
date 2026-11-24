@@ -95,6 +95,7 @@ jobs:
           node scripts/test_push_notifications.mjs
           node scripts/test_schedule_occurrences.mjs
           node scripts/test_schedule_follow.mjs
+          node scripts/test_schedule_follow_push.mjs
           node scripts/test_schedule_pauses.mjs
           node scripts/test_one_off_activities.mjs
           node scripts/test_free_alerts.mjs

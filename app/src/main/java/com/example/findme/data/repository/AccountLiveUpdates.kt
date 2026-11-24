@@ -25,7 +25,8 @@ internal object AccountLiveUpdates {
                     // connection_preferences is left out on purpose: one unavailable table makes the whole
                     // channel fail. Own changes reload after saving; other devices sync with the minute poll.
                     coroutineScope {
-                        listOf("connection_signals", "personal_schedule", "personal_status", "current_place", "person_connections", "account_profiles", "quick_messages").forEach { source ->
+                        listOf("connection_signals", "personal_schedule", "personal_status", "current_place", "person_connections", "account_profiles", "quick_messages",
+                            "plan_proposals", "schedule_follow_requests").forEach { source ->
                             val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = source }
                             launch { changes.collect { trySend(Unit) } }
                         }
