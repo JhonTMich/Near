@@ -261,14 +261,26 @@ object AutoPlaces {
     }
 
     /**
-     * [manualStatus]: an own status is active and was not set by a place. [marker]: the place that set the
-     * current automatic status, if any.
+     * The status that matches where the phone is now, given what was shared last ([marker]: the place or
+     * «En la calle» behind the current automatic status) and [street], what «En la calle» decides when the
+     * phone is in no saved place. It depends only on the current state, so a late or repeated run gives the
+     * same result. [manualStatus]: an own status is active and was not set by a place. [entered]: the latest
+     * transition was an arrival; after leaving one place while still in another, the other is shared only if
+     * an automatic status was showing, so a status removed by hand stays removed. [inside] goes from the
+     * first place entered to the latest.
      */
-    fun decide(entering: Boolean, place: AutoPlace, marker: String?, manualStatus: Boolean): Change = when {
-        entering && manualStatus -> Change.Nothing
-        entering -> Change.Share(place.label, place.id)
-        marker == place.id -> Change.Clear
-        else -> Change.Nothing
+    fun desired(places: List<AutoPlace>, inside: List<String>, marker: String?, manualStatus: Boolean,
+        entered: Boolean, street: Change): Change {
+        if (manualStatus) return Change.Nothing
+        val here = inside.mapNotNull { id -> places.find { it.id == id } }
+        if (here.isNotEmpty()) {
+            if (here.any { it.id == marker }) return Change.Nothing
+            if (!entered && marker == null) return Change.Nothing
+            val latest = here.last()
+            return Change.Share(latest.label, latest.id)
+        }
+        if (street != Change.Nothing) return street
+        return if (marker != null && marker != STREET_MARKER) Change.Clear else Change.Nothing
     }
 
     /** The saved places the phone is in now, kept from the enter and exit transitions. */
@@ -326,27 +338,33 @@ object AutoPlaces {
         return change
     }
 
+    /**
+     * A transition, handled on the phone only: it notes which places the phone is in and leaves sharing the
+     * status to [PlaceStatusWorker], which waits for network and retries. Sending it here, with a few seconds
+     * and often no network (the phone switching between Wi-Fi and mobile data), lost it for good.
+     */
     internal suspend fun handle(context: Context, entering: Boolean, placeIds: List<String>) {
-        val auth = SupabaseClientProvider.client.auth
-        auth.awaitInitialization()
-        val owner = auth.currentUserOrNull()?.id ?: return
+        val owner = WidgetStore.data(context)?.owner ?: SupabaseClientProvider.client.auth.let { auth ->
+            auth.awaitInitialization()
+            auth.currentUserOrNull()?.id
+        } ?: return
         val places = places(context, owner)
         val place = places.firstOrNull { it.id in placeIds } ?: return
         val inside = (if (entering) inside(context, owner) + placeIds else inside(context, owner) - placeIds.toSet())
             .filter { id -> places.any { it.id == id } }.toSet()
         setInside(context, owner, inside)
-        val situation = situation(context, owner)
-        val change = when {
-            entering -> decide(true, place, situation.marker, situation.manualStatus)
-            // Two places that touch: leaving one while still in the other shares the other.
-            inside.isNotEmpty() && situation.marker == place.id ->
-                places.first { it.id in inside }.let { Change.Share(it.label, it.id) }
-            else -> streetChange(context, owner, inside, situation).takeUnless { it == Change.Nothing }
-                ?: decide(false, place, situation.marker, situation.manualStatus)
-        }
+        PlaceStatusWorker.enqueue(context, owner, entering)
         // Arriving at a place may be arriving at an activity; this only reads the cache and enqueues the mark.
         if (entering) runCatching { com.example.findme.attendance.AttendanceTracker.check(context) }
         else runCatching { com.example.findme.attendance.AttendanceTracker.leftPlace(context, owner, place.id, inside) }
+    }
+
+    /** Shares the status that matches the places the phone is in now. Throws when the network fails, to retry. */
+    internal suspend fun sync(context: Context, owner: String, entered: Boolean) {
+        val inside = inside(context, owner)
+        val situation = situation(context, owner)
+        val street = if (inside.isEmpty()) streetChange(context, owner, inside, situation) else Change.Nothing
+        val change = desired(places(context, owner), inside.toList(), situation.marker, situation.manualStatus, entered, street)
         if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
     }
 
