@@ -554,6 +554,20 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
             is UserCurrentStatus.Error -> "Estado no disponible"
             is UserCurrentStatus.Loading -> "Consultando actividad…"
         }
+        // The span of what is shown now, for the bar under the title: the activity, or the shared status
+        // from the moment it was shared until it ends.
+        val span: Pair<ZonedDateTime, ZonedDateTime>? = when (current) {
+            is UserCurrentStatus.InClass -> today.firstOrNull { it.schedule.id == current.currentSchedule.id &&
+                !now.isBefore(it.window.start) && now.isBefore(it.window.end) }?.let { it.window.start to it.window.end }
+            is UserCurrentStatus.Override -> state.statuses.firstOrNull { !it.isPlace && it.isActive && it.customLocation == current.customLocation }
+                ?.let { dto ->
+                    val start = dto.createdAt?.let(StatusRepository::parseIsoToInstant)?.atZone(now.zone)
+                    val end = StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)
+                    if (start != null && end != null && start.isBefore(end)) start to end else null
+                }
+            else -> null
+        }
+        val remaining = span?.let { java.time.Duration.between(now, it.second).toMinutes().coerceAtLeast(0) }
         val detail = when (current) {
             is UserCurrentStatus.FreeTime -> next?.let { "Hasta las ${it.window.start.format(hourFormat)}" }
                 ?: "Sin más actividades hoy"
@@ -561,51 +575,64 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
                 "Termina en ${formatDurationMinutes(current.remainingMinutes)}").filter { it.isNotBlank() }.joinToString(" · ")
             is UserCurrentStatus.Override -> listOfNotNull(
                 current.customMessage?.takeIf { it.isNotBlank() },
-                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" }
+                StatusRepository.parseIsoToInstant(current.expiresAt)?.atZone(now.zone)?.let { "Hasta las ${it.format(hourFormat)}" },
+                remaining?.let { "${compactDuration(it)} restantes" }
             ).joinToString(" · ")
             is UserCurrentStatus.Error -> current.message
             is UserCurrentStatus.Loading -> ""
         }.let { text -> listOfNotNull(current.place, text.takeIf { it.isNotBlank() }).joinToString(" · ") }
-        Surface(shape = RoundedCornerShape(22.dp), color = AccentContainer, contentColor = TextPrimary) {
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(title, style = MaterialTheme.typography.headlineLarge)
-                        if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+        HeroPanel {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Eyebrow("Estado actual")
+                    Text(title, style = MaterialTheme.typography.headlineMedium)
+                    if (detail.isNotBlank()) Text(detail, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                StatusOrb(statusIcon(current))
+            }
+            span?.let { (start, end) ->
+                val total = java.time.Duration.between(start, end).toMillis().toFloat()
+                val progress = (java.time.Duration.between(start, now).toMillis() / total).coerceIn(0f, 1f)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp),
+                        color = MaterialTheme.colorScheme.primary, trackColor = TextPrimary.copy(alpha = .12f), gapSize = 0.dp,
+                        drawStopIndicator = {})
+                    Row {
+                        Text(start.format(hourFormat), Modifier.weight(1f), style = MonoLabel, color = TextSecondary)
+                        Text(end.format(hourFormat), style = MonoLabel, color = TextSecondary)
                     }
-                    Image(painterResource(R.drawable.near_clock_cat), contentDescription = null,
-                        modifier = Modifier.size(106.dp))
                 }
-                Button(onClick = { editStatus = true }, enabled = !state.busy) {
-                    Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado")
+            }
+            Button(onClick = { editStatus = true }, enabled = !state.busy, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp)) {
+                Text(if (current is UserCurrentStatus.Override) "Cambiar mi estado" else "Compartir mi estado", fontWeight = FontWeight.Bold)
+            }
+            if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
+                Text("Volver al horario", fontWeight = FontWeight.Bold)
+            }
+            inProgress?.let { occurrence ->
+                OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
+                    Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
                 }
-                if (current is UserCurrentStatus.Override) TextButton(onClick = actions::clearStatus, enabled = !state.busy) {
-                    Text("Volver al horario")
-                }
-                inProgress?.let { occurrence ->
-                    OutlinedButton(onClick = { confirmEnd = true }, enabled = !state.busy) {
-                        Icon(Icons.Default.StopCircle, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Terminar ahora")
-                    }
-                    if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
-                        title = { Text("¿Terminó ${occurrence.schedule.title}?") },
-                        text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
-                            "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
-                        confirmButton = { Button(onClick = {
-                            confirmEnd = false
-                            actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
-                        }) { Text("Terminar") } },
-                        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
-                }
+                if (confirmEnd) AlertDialog(onDismissRequest = { confirmEnd = false }, shape = RoundedCornerShape(28.dp), containerColor = CardBg,
+                    title = { Text("¿Terminó ${occurrence.schedule.title}?") },
+                    text = { Text("Solo cambia la de hoy: termina a las ${now.format(hourFormat)} y tu gente te verá libre. " +
+                        "Puedes restaurarla desde «Solo esta fecha».", color = TextSecondary) },
+                    confirmButton = { Button(onClick = {
+                        confirmEnd = false
+                        actions.endActivityNow(occurrence.schedule.id, occurrence.originalDate.toString())
+                    }) { Text("Terminar") } },
+                    dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancelar") } })
             }
         }
     }
-    Text("Mi día", style = MaterialTheme.typography.headlineSmall)
-    next?.let { upcoming ->
-        Text("Próxima en tu horario", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-        Text(upcoming.schedule.title, style = MaterialTheme.typography.titleMedium)
-    }
     val pause = state.pauses.covering(profile?.id, now.toLocalDate())
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Mi día", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+        if (pause == null && today.isNotEmpty()) freeWindow(today.map { it.window.start to it.window.end }, now)?.let { label ->
+            StateChip(label, FreeInk, FreeSurface, dot = false)
+        }
+    }
     if (today.isEmpty()) {
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -620,15 +647,97 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
         }
     } else {
         pause?.let { StatusPill("${it.title} · horario en pausa", BrandSky) }
-        today.forEachIndexed { index, occurrence ->
-            ActivityTimelineCard(occurrence.schedule,
-                active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
-                    now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
-                last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
+        // «Ahora» goes before the first activity still to start, or after the last one.
+        val nowIndex = today.indexOfFirst { it.window.start.isAfter(now) }.let { if (it < 0) today.size else it }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            today.forEachIndexed { index, occurrence ->
+                if (index == nowIndex) NowMarker(now)
+                ActivityTimelineCard(occurrence.schedule,
+                    active = status is UserCurrentStatus.InClass && !now.isBefore(occurrence.window.start) &&
+                        now.isBefore(occurrence.window.end) && status.currentSchedule.id == occurrence.schedule.id,
+                    last = index == today.lastIndex, displayDay = now.dayOfWeek.value, compact = true)
+            }
+            if (nowIndex == today.size && now.toLocalDate() == today.last().window.end.toLocalDate()) NowMarker(now)
         }
         TextButton(onClick = onOpenSchedule) { Text("Ver horario") }
     }
     if (editStatus) StatusEditor(state, actions, status as? UserCurrentStatus.Override) { editStatus = false }
+}
+
+/** The lit card at the top of Hoy and of a contact: a violet gradient with its own border. */
+@Composable
+private fun HeroPanel(content: @Composable ColumnScope.() -> Unit) {
+    NearCard(shape = RoundedCornerShape(24.dp), color = HeroGradient.last(), border = HeroBorder, padding = PaddingValues(0.dp)) {
+        Column(Modifier.fillMaxWidth().background(Brush.linearGradient(HeroGradient)).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    }
+}
+
+/** The icon of the current status inside two rings. */
+@Composable
+private fun StatusOrb(icon: ImageVector) {
+    val primary = MaterialTheme.colorScheme.primary
+    Box(Modifier.size(64.dp).border(1.5.dp, primary.copy(alpha = .45f), CircleShape).padding(7.dp)
+        .background(primary.copy(alpha = .18f), CircleShape), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).background(primary.copy(alpha = .9f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+@Composable
+private fun statusIcon(status: UserCurrentStatus): ImageVector = when (status) {
+    is UserCurrentStatus.InClass -> ActivityCategory.fromKey(status.currentSchedule.category, status.currentSchedule.title).icon
+    is UserCurrentStatus.Override -> status.customLocation.lowercase().let { text ->
+        when {
+            "casa" in text && "camino" !in text -> Icons.Default.Home
+            "camino" in text || "calle" in text -> Icons.Default.DirectionsWalk
+            "ocupad" in text -> Icons.Default.DoNotDisturbOn
+            "disponible" in text || "libre" in text -> Icons.Default.WbSunny
+            else -> Icons.Default.Place
+        }
+    }
+    is UserCurrentStatus.FreeTime -> Icons.Default.WbSunny
+    else -> Icons.Default.Info
+}
+
+/** «1h 45m», «35m». */
+private fun compactDuration(minutes: Long): String =
+    if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m".removeSuffix(" 0m") else "${minutes}m"
+
+/**
+ * The free stretch of the day that is going on now, or the next one: «Libre 10:35 – 16:10»,
+ * «Libre hasta 08:00» before the first activity and «Libre desde 21:35» after the last.
+ */
+internal fun freeWindow(busy: List<Pair<ZonedDateTime, ZonedDateTime>>, now: ZonedDateTime): String? {
+    val dayStart = now.toLocalDate().atStartOfDay(now.zone)
+    val gaps = mutableListOf<Pair<ZonedDateTime, ZonedDateTime?>>()
+    var cursor = dayStart
+    busy.sortedBy { it.first }.forEach { (start, end) ->
+        if (start.isAfter(cursor)) gaps += cursor to start
+        if (end.isAfter(cursor)) cursor = end
+    }
+    if (cursor.toLocalDate() == now.toLocalDate()) gaps += cursor to null
+    val (start, end) = gaps.firstOrNull { (_, end) -> end == null || end.isAfter(now) } ?: return null
+    val format = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
+    return when {
+        end == null -> "Libre desde ${start.format(format)}"
+        start == dayStart -> "Libre hasta ${end.format(format)}"
+        else -> "Libre ${start.format(format)} – ${end.format(format)}"
+    }
+}
+
+/** The line of the present moment across the day. */
+@Composable
+private fun NowMarker(now: ZonedDateTime) {
+    val primary = MaterialTheme.colorScheme.primary
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(now.format(hourFormat), Modifier.width(48.dp), style = MonoLabel, color = primary, textAlign = TextAlign.Center)
+        Box(Modifier.size(7.dp).background(primary, CircleShape))
+        Text("Ahora", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = primary)
+        Box(Modifier.weight(1f).height(1.dp).background(primary.copy(alpha = .35f)))
+    }
 }
 
 @Composable

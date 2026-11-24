@@ -85,7 +85,7 @@ fun StateChip(text: String, ink: Color, background: Color, modifier: Modifier = 
 @Composable
 fun MonoTag(text: String, modifier: Modifier = Modifier, color: Color = TextSecondary) {
     Box(modifier.border(1.dp, CardBorder, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(text, style = MonoLabel, color = color, maxLines = 1)
+        Text(text, style = MonoLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

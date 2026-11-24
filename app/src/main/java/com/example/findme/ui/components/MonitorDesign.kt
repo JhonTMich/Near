@@ -47,39 +47,41 @@ fun StatusPill(text: String, color: Color = MaterialTheme.colorScheme.primary, p
     }
 }
 
+/**
+ * One activity of a day: its start in monospace with the line of the day under it, and a card with the
+ * category, the room, the title and when it ends.
+ */
 @Composable
-fun ActivityTimelineCard(schedule: ScheduleDto, active: Boolean, last: Boolean = false, displayDay: Int = schedule.dayOfWeek, compact: Boolean = false) {
+fun ActivityTimelineCard(schedule: ScheduleDto, active: Boolean, last: Boolean = false, displayDay: Int = schedule.dayOfWeek,
+    compact: Boolean = false) {
     val category = ActivityCategory.fromKey(schedule.category, schedule.title)
     val accent = category.accentColor
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Column(Modifier.width(68.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (schedule.continuesOn(displayDay)) "Desde ayer" else formatScheduleTime(schedule.startTime),
-                style = MaterialTheme.typography.labelMedium, color = if (active) accent else TextSecondary)
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.size(10.dp).background(accent.copy(alpha = .15f), CircleShape).padding(2.dp).background(accent, CircleShape))
-            if (!last) Box(Modifier.padding(top = 7.dp).width(1.dp).weight(1f).background(CardBorder))
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.width(48.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (schedule.continuesOn(displayDay)) "Ayer" else schedule.startTime.take(5),
+                Modifier.padding(top = 14.dp), style = MonoLabel, color = if (active) accent else TextSecondary)
+            if (!last) Box(Modifier.padding(top = 8.dp, bottom = 2.dp).width(1.dp).weight(1f).background(CardBorder))
         }
-        Card(Modifier.weight(1f).padding(bottom = 4.dp).animateContentSize(), shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-            border = BorderStroke(1.dp, if (active) accent.copy(alpha = .6f) else CardBorder)) {
-            Column(Modifier.fillMaxWidth().background(if (compact) SlateContainer else CardBg)
-                .padding(if (compact) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(category.icon, null, tint = accent, modifier = Modifier.size(16.dp))
-                    Text(category.label.uppercase(), style = MaterialTheme.typography.labelSmall, color = accent, modifier = Modifier.weight(1f))
-                    if (active) StatusPill("En curso", StatusGreenText, pulse = true)
-                }
-                Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                if (schedule.location.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.LocationOn, null, tint = TextMuted, modifier = Modifier.size(15.dp))
-                    Text(schedule.location, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Schedule, null, tint = TextMuted, modifier = Modifier.size(14.dp))
-                    val nextDay = if (schedule.endsNextDay && !schedule.continuesOn(displayDay)) " del día siguiente" else ""
-                    Text("Hasta ${formatScheduleTime(schedule.endTime)}$nextDay", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-                    if (schedule.modality.isNotBlank()) Text("· ${schedule.modality}", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-                }
+        NearCard(Modifier.weight(1f).padding(bottom = 4.dp),
+            border = if (active) accent.copy(alpha = .7f) else CardBorder,
+            padding = PaddingValues(horizontal = 16.dp, vertical = if (compact) 14.dp else 16.dp), spacing = 6.dp) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(category.icon, null, tint = accent, modifier = Modifier.size(15.dp))
+                Eyebrow(category.label, Modifier.weight(1f), color = accent)
+                if (active) StatusPill("En curso", StatusGreenText, pulse = true)
+                else if (schedule.location.isNotBlank()) MonoTag(schedule.location, Modifier.widthIn(max = 150.dp))
+            }
+            Text(schedule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+            if (active && schedule.location.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.LocationOn, null, tint = TextMuted, modifier = Modifier.size(14.dp))
+                Text(schedule.location, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Schedule, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                val nextDay = if (schedule.endsNextDay && !schedule.continuesOn(displayDay)) " del día siguiente" else ""
+                Text(listOf("Hasta ${formatScheduleTime(schedule.endTime)}$nextDay", schedule.modality).filter { it.isNotBlank() }
+                    .joinToString(" · "), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
