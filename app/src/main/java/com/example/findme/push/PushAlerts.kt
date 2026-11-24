@@ -66,6 +66,13 @@ object PushAlerts {
                     if (accepted) "$title · $time. Ya está en el horario de ambos." else "$title · $time", person ?: return null,
                     requested = true)
             }
+            "plan_cancelled" -> {
+                val id = data["id"]?.takeIf { it.isNotBlank() } ?: return null
+                val title = data["title"]?.takeIf { it.isNotBlank() } ?: return null
+                PushAlert(AccountAlert.Messages, NotificationHelper.Channel.Requested, planId(id),
+                    "$name canceló el plan", if (data["was_accepted"] == "true") "$title · Se quitó del horario de ambos."
+                    else "$title · La propuesta ya no está disponible.", person ?: return null, requested = true)
+            }
             else -> null
         }
     }

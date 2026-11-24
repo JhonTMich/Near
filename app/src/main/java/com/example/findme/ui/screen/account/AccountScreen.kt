@@ -915,6 +915,8 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
                                     showEditor = true
                                 })
                                 DropdownMenuItem(text = { Text(when {
+                                    Plans.forActivity(state.plans, recurring.id, state.profile?.id.orEmpty())?.let {
+                                        Plans.canCancel(it, state.profile?.id.orEmpty(), Instant.now()) } == true -> "Cancelar plan"
                                     recurring.sourceId != null -> "Dejar de seguir esta actividad"
                                     recurring.isOneOff -> "Eliminar"
                                     else -> "Eliminar serie"
@@ -968,7 +970,11 @@ private fun ScheduleManager(state: AccountState, actions: AccountActions) {
         { pendingPauseDelete = null }, { actions.deletePause(paused.id); pendingPauseDelete = null }) }
     if (showEditor) ScheduleEditor(editing, day, date, today, state, actions) { showEditor = false }
     pendingDelete?.let { schedule ->
-        if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
+        val owner = state.profile?.id.orEmpty()
+        val sharedPlan = Plans.forActivity(state.plans, schedule.id, owner)
+        if (sharedPlan != null && Plans.canCancel(sharedPlan, owner, Instant.now()))
+            CancelPlanConfirmation(sharedPlan, { pendingDelete = null }, { actions.cancelPlan(sharedPlan.id); pendingDelete = null })
+        else if (schedule.sourceId != null) Confirm("¿Dejar de seguir ${schedule.title}?", "Se quitará de tu horario. Puedes volver a elegirla desde la ficha del contacto.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
         else if (schedule.isOneOff) Confirm("¿Eliminar ${schedule.title}?", "Solo ocurre una vez; desaparecerá de tu horario.",
             { pendingDelete = null }, { actions.deleteSchedule(schedule.id); pendingDelete = null })
@@ -1873,6 +1879,7 @@ private fun GroupEditor(existing: PersonGroup?, state: AccountState, actions: Ac
 @Composable
 private fun PlansPanel(state: AccountState, actions: AccountActions) {
     val own = state.profile?.id ?: return
+    var cancelling by remember { mutableStateOf<PlanProposal?>(null) }
     val now = Instant.now()
     val plans = Plans.upcoming(state.plans, now).filter { it.status != "cancelled" }
     if (plans.isEmpty()) return
@@ -1899,16 +1906,28 @@ private fun PlansPanel(state: AccountState, actions: AccountActions) {
                         }
                         plan.status == "pending" -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Esperando respuesta de $other", Modifier.weight(1f), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { actions.cancelPlan(plan.id) }, enabled = !state.busy) { Text("Cancelar") }
+                            TextButton(onClick = { cancelling = plan }, enabled = !state.busy) { Text("Cancelar propuesta") }
                         }
-                        plan.status == "accepted" -> StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                        plan.status == "accepted" -> {
+                            StatusPill(if (received) "Aceptado · en tu horario" else "$other aceptó · en tu horario", BrandSky)
+                            if (Plans.canCancel(plan, own, now)) TextButton(onClick = { cancelling = plan }, enabled = !state.busy) {
+                                Text("Cancelar plan", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                         else -> StatusPill(if (received) "Lo rechazaste" else "$other no puede", TextMuted)
                     }
                 }
             }
         }
     }
+    cancelling?.let { plan -> CancelPlanConfirmation(plan, { cancelling = null }, { actions.cancelPlan(plan.id); cancelling = null }) }
 }
+
+@Composable
+private fun CancelPlanConfirmation(plan: PlanProposal, dismiss: () -> Unit, confirm: () -> Unit) =
+    Confirm("¿Cancelar «${plan.title}»?",
+        if (plan.status == "accepted") "El plan se quitará de los horarios de ambos y se avisará a la otra persona."
+        else "Se retirará la propuesta y se avisará a la otra persona.", dismiss, confirm)
 
 @Composable
 private fun PlanSheet(person: AccountProfile, slot: FreeSlot, state: AccountState, actions: AccountActions, dismiss: () -> Unit) {

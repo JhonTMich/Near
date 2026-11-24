@@ -63,7 +63,8 @@ class NearMessagingService : FirebaseMessagingService() {
             // A received message can be answered from the notification.
             val reply = if (data["type"] == "message") NotificationHelper.Reply(owner, alert.person,
                 MessageReplies.suggestions(context, owner)) else null
-            NotificationHelper.show(context, alert.channel, alert.id, alert.title, alert.text, reply)
+            NotificationHelper.show(context, alert.channel, alert.id, alert.title, alert.text, reply,
+                alertAgain = data["type"] == "plan_cancelled")
         }
     }
 }

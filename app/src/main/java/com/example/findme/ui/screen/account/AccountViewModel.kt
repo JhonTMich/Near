@@ -183,6 +183,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     "FM005" -> "Ese horario ya no está libre para quien te propuso el plan. Pídele que proponga otro."
                     "FM006" -> "El contacto dejó de compartir su horario. La sincronización sigue activa. Puedes cerrarla sin guardar una copia."
                     "FM007" -> "La conexión terminó. Ya no se puede aceptar el plan."
+                    "FM008" -> "No pudimos identificar con seguridad las actividades de este plan antiguo. Revisa ambos horarios antes de quitarlo."
                     else -> failure
                 }
                 // Only the code: the full error carries the request URL with account ids.
@@ -732,8 +733,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         refreshAfterSave(if (accept) "Plan aceptado. Ya está en tu horario." else "Respuesta enviada.")
     }
     override fun cancelPlan(id: String) = perform {
+        val accepted = _state.value.plans.any { it.id == id && it.status == "accepted" }
         val plan = repository.cancelPlan(id)
-        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }, notice = "Propuesta cancelada.") }
+        _state.update { old -> old.copy(plans = old.plans.map { if (it.id == id) plan else it }) }
+        refreshAfterSave(if (accepted) "Plan cancelado. Se quitó de los horarios de ambos." else "Propuesta cancelada.")
     }
 
     override fun saveGroup(draftId: String, id: String?, name: String, members: Set<String>) = perform {
