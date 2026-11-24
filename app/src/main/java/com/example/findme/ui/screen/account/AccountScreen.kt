@@ -151,22 +151,29 @@ fun AccountContent(state: AccountState, actions: AccountActions,
     LaunchedEffect(state.scheduleRevision, state.signedIn) { if (state.scheduleRevision > 0 && state.signedIn) tab = "Horario" }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
-    Box(Modifier.fillMaxSize().background(AppBackground)) {
+    Box(Modifier.fillMaxSize().nearBackdrop()) {
     Scaffold(containerColor = Color.Transparent, contentColor = TextPrimary, snackbarHost = { NearSnackbarHost(snackbar) }, topBar = {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!state.signedIn) BrandMark(Modifier.size(40.dp))
-            Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-            if (state.signedIn) {
-                IconButton(onClick = actions::refresh, enabled = !state.busy) {
-                    if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
-                    else Icon(Icons.Default.Refresh, "Actualizar", tint = TextSecondary)
+        // Signed in, the bar is its own band; on the sign-in screen it sits on the backdrop with the mark.
+        Column(Modifier.fillMaxWidth().then(if (state.signedIn) Modifier.background(BarBg) else Modifier)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!state.signedIn) BrandMark(Modifier.size(40.dp))
+                Text("Near", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                if (state.signedIn) {
+                    Surface(onClick = actions::refresh, enabled = !state.busy, shape = CircleShape, color = Color.Transparent,
+                        contentColor = TextSecondary, border = BorderStroke(1.dp, CardBorder), modifier = Modifier.size(42.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
+                            else Icon(Icons.Default.Refresh, "Actualizar", Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
+            if (state.signedIn) HorizontalDivider(color = CardBorder)
         }
     }, bottomBar = {
         if (state.signedIn && state.profile?.needsProfile == false) {
-            Column(Modifier.fillMaxWidth().background(AppBackground).navigationBarsPadding()) {
+            Column(Modifier.fillMaxWidth().background(BarBg).navigationBarsPadding()) {
                 HorizontalDivider(color = CardBorder)
                 NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp,
                     windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.heightIn(min = 68.dp)) {
@@ -174,11 +181,12 @@ fun AccountContent(state: AccountState, actions: AccountActions,
                         Triple("Personas", "Personas", Icons.Default.PeopleOutline), Triple("Cuenta", "Perfil", Icons.Default.PersonOutline)).forEach { (id, title, icon) ->
                         NavigationBarItem(selected = tab == id, onClick = { tab = id },
                             modifier = Modifier.testTag("near-tab-$title"),
-                            icon = { Icon(icon, null, Modifier.size(22.dp)) },
-                            label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(selectedIconColor = TextPrimary,
-                                selectedTextColor = TextPrimary, indicatorColor = AccentContainer,
-                                unselectedIconColor = TextMuted, unselectedTextColor = TextMuted))
+                            icon = { Icon(icon, null, Modifier.size(21.dp)) },
+                            label = { Text(title, maxLines = 1, style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (tab == id) FontWeight.Bold else FontWeight.Medium) },
+                            colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = AccentContainer,
+                                unselectedIconColor = TextSecondary, unselectedTextColor = TextSecondary))
                     }
                 }
             }
@@ -190,7 +198,7 @@ fun AccountContent(state: AccountState, actions: AccountActions,
             val viewport = maxHeight
             Column(Modifier.fillMaxSize()
                 .verticalScroll(rememberScrollState()).imePadding()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 state.error?.let { error -> Panel {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.error)
@@ -298,29 +306,29 @@ private fun resendSecondsLeft(sentAt: Long?): Int {
 private fun countdown(seconds: Int) = "%d:%02d".format(Locale.ROOT, seconds / 60, seconds % 60)
 
 @Composable
-private fun PageHeading(eyebrow: String, title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        if (eyebrow.isNotBlank()) Text(eyebrow.uppercase(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp)
-        Text(title, Modifier.testTag("near-heading-$title").semantics { heading() },
-            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+private fun PageHeading(eyebrow: String, title: String, subtitle: String, trailing: String? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (eyebrow.isNotBlank()) Eyebrow(eyebrow, color = MaterialTheme.colorScheme.primary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f).testTag("near-heading-$title").semantics { heading() },
+                style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            trailing?.let { Text(it, color = TextSecondary, style = MonoLabel) }
+        }
         if (subtitle.isNotBlank()) Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 private fun Panel(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, CardBorder),
-        colors = CardDefaults.cardColors(containerColor = CardBg)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
-    }
+    NearCard(padding = PaddingValues(18.dp), spacing = 14.dp, content = content)
 }
 
 @Composable
 private fun SectionHeading(icon: ImageVector, title: String, subtitle: String? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        AccentIcon(icon, MaterialTheme.colorScheme.primary)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        IconBubble(icon)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             subtitle?.let { Text(it, color = TextSecondary, style = MaterialTheme.typography.bodySmall) }
         }
     }
