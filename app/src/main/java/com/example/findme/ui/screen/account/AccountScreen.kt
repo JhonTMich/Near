@@ -1448,43 +1448,21 @@ private fun CommonAvailabilitySheet(person: AccountProfile, actions: AccountActi
         }
     }
 
-    Sheet(dismiss, "Horas libres con ${person.displayName}") {
+    Sheet(dismiss, "Libres con ${person.displayName}", "Toca un hueco para proponer un plan.") {
         val pair = schedules
         when {
-            loading -> Text("Consultando ambos horarios…", color = TextSecondary)
+            loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text("Comparando horarios…", color = TextSecondary)
+            }
             error -> {
                 Text("No pudimos consultar la disponibilidad.", color = TextSecondary)
                 TextButton(onClick = { retry++ }) { Text("Reintentar") }
             }
             pair == null -> Text("Ambas personas deben compartir su horario en esta conexión.", color = TextSecondary)
             else -> {
-                Text("Próximos 7 días. Huecos de 30 minutos o más, en tu zona horaria. Se calculan a partir de sus actividades programadas. " +
-                    "Toca un hueco para proponer un plan.",
-                    color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-                Choices(listOf(false, true), allHours, { allHours = it }) { if (it) "Todo el día" else "8:00–22:00" }
                 val freeDays = remember(pair, allHours, asOf) { commonFreeTime(pair, asOf, allHours) }
-                freeDays.forEach { day ->
-                    Surface(shape = RoundedCornerShape(18.dp), color = CardBg, border = BorderStroke(1.dp, CardBorder)) {
-                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(day.date.longDate().replaceFirstChar(Char::titlecase), style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                if (day.slots.isNotEmpty()) Text("${day.slots.size} ${if (day.slots.size == 1) "hueco" else "huecos"}",
-                                    color = TextMuted, style = MaterialTheme.typography.labelMedium)
-                            }
-                            if (day.slots.isEmpty()) Text("Sin huecos de 30 min", color = TextMuted, style = MaterialTheme.typography.bodySmall)
-                            else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                day.slots.forEach { slot ->
-                                    val end = if (slot.end.toLocalDate() > day.date) "24:00" else slot.end.format(hourFormat)
-                                    SuggestionChip(onClick = { onPropose(slot) }, label = { Text("${slot.start.format(hourFormat)} – $end") },
-                                        icon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
-                                        colors = SuggestionChipDefaults.suggestionChipColors(labelColor = BrandSky, iconContentColor = BrandSky),
-                                        border = BorderStroke(1.dp, BrandSky.copy(alpha = .45f)))
-                                }
-                            }
-                        }
-                    }
-                }
+                CommonFreeTimeView(freeDays, allHours, { allHours = it }, onPropose)
             }
         }
     }
