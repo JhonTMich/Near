@@ -436,8 +436,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     suspend fun observeWhileVisible(): Unit = coroutineScope {
         launch {
             while (isActive) {
+                // On opening, then every few minutes: geofences report entering and leaving in between, so
+                // this only catches a transition they missed, and does not keep the location radios busy.
                 runCatching { com.example.findme.places.AutoPlaces.reconcile(getApplication(), locate = true) }
-                delay(60_000)
+                delay(com.example.findme.places.AutoPlaces.VISIBLE_CHECK_MS)
             }
         }
         launch {
