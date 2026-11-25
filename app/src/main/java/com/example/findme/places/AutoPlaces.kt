@@ -92,6 +92,17 @@ object AutoPlaces {
     private fun markerKey(owner: String) = stringPreferencesKey("auto_status_$owner")
     private fun insideKey(owner: String) = stringPreferencesKey("auto_inside_$owner")
     private fun markedAtKey(owner: String) = stringPreferencesKey("auto_status_at_$owner")
+    /** The [awayFrom] sent with the last place, to send it again when it changes. */
+    private fun awayKey(owner: String) = stringPreferencesKey("auto_status_away_$owner")
+
+    /**
+     * The activity categories with a saved place the phone is not in now: «university» while at home or on
+     * the street, so a class in progress shows as on the way until the phone reaches one of its places.
+     */
+    fun awayFrom(places: List<AutoPlace>, inside: Set<String>): List<String> {
+        val here = places.filter { it.id in inside }.mapNotNull { it.activityCategory }.toSet()
+        return CATEGORIES.filter { category -> category !in here && places.any { it.activityCategory == category } }
+    }
     private fun legacyKey(owner: String) = stringPreferencesKey("auto_place_layer_$owner")
 
     fun validateLabel(label: String): String? =
@@ -287,16 +298,16 @@ object AutoPlaces {
         context.dataStore.edit { if (ids.isEmpty()) it.remove(insideKey(owner)) else it[insideKey(owner)] = ids.joinToString(",") }
     }
 
-    private suspend fun apply(context: Context, owner: String, change: Change): Boolean {
+    private suspend fun apply(context: Context, owner: String, change: Change, away: List<String>): Boolean {
         val repository = AccountRepository()
         when (change) {
             is Change.Share -> {
-                repository.setPlace(change.label, PLACE_MINUTES)
-                mark(context, owner, change.placeId)
+                repository.setPlace(change.label, PLACE_MINUTES, away)
+                mark(context, owner, change.placeId, away)
             }
             is Change.Street -> {
-                repository.setPlace(STREET, change.minutes)
-                mark(context, owner, STREET_MARKER)
+                repository.setPlace(STREET, change.minutes, away)
+                mark(context, owner, STREET_MARKER, away)
             }
             Change.Clear -> {
                 repository.clearPlace()
@@ -307,10 +318,13 @@ object AutoPlaces {
         return true
     }
 
-    private suspend fun mark(context: Context, owner: String, marker: String?) {
+    private suspend fun mark(context: Context, owner: String, marker: String?, away: List<String> = emptyList()) {
         context.dataStore.edit { prefs ->
-            if (marker == null) { prefs.remove(markerKey(owner)); prefs.remove(markedAtKey(owner)) }
-            else { prefs[markerKey(owner)] = marker; prefs[markedAtKey(owner)] = Instant.now().toString() }
+            if (marker == null) { prefs.remove(markerKey(owner)); prefs.remove(markedAtKey(owner)); prefs.remove(awayKey(owner)) }
+            else {
+                prefs[markerKey(owner)] = marker; prefs[markedAtKey(owner)] = Instant.now().toString()
+                prefs[awayKey(owner)] = away.joinToString(",")
+            }
         }
     }
 
@@ -365,8 +379,11 @@ object AutoPlaces {
         val places = places(context, owner)
         val street = street(AccountSettingsRepository(context).settings(owner).first().streetStatus,
             places.isNotEmpty(), inside, marker)
-        val change = desired(places, inside.toList(), marker, street, stale)
-        if (apply(context, owner, change)) GlanceWidgetWorker.enqueueRefresh(context)
+        val away = awayFrom(places, inside)
+        // A category given to a place, or a place removed, changes it without changing the place shared.
+        val awayChanged = marker != null && prefs[awayKey(owner)] != away.joinToString(",")
+        val change = desired(places, inside.toList(), marker, street, stale || awayChanged)
+        if (apply(context, owner, change, away)) GlanceWidgetWorker.enqueueRefresh(context)
     }
 
     /**

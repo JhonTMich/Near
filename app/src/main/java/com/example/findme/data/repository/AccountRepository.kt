@@ -358,12 +358,18 @@ class AccountRepository {
     }
 
     /** Where you are now («En casa»): shown next to your activity or status, never instead of it. */
-    suspend fun setPlace(label: String, minutes: Long) {
+    suspend fun setPlace(label: String, minutes: Long, awayFrom: List<String>? = null) {
         require(label.trim().length in 1..60)
         require(minutes in 1..4320)
         val id = userId()
-        client.postgrest["current_place"].upsert(CurrentPlaceDto(id, label.trim(),
-            Instant.now().plusSeconds(minutes * 60).toString()))
+        val place = CurrentPlaceDto(id, label.trim(), Instant.now().plusSeconds(minutes * 60).toString(), awayFrom)
+        try {
+            client.postgrest["current_place"].upsert(place)
+        } catch (error: PostgrestRestException) {
+            // A server without `away_from` yet still gets the place.
+            if (error.code != "PGRST204" || place.awayFrom == null) throw error
+            client.postgrest["current_place"].upsert(place.copy(awayFrom = null))
+        }
     }
 
     suspend fun clearPlace() {
