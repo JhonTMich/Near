@@ -63,7 +63,7 @@ fun HeroStatusCard(
                         Box(Modifier.size(6.dp).background(accent, CircleShape))
                     }
                     Text(when (status) {
-                        is UserCurrentStatus.InClass -> "Actividad en curso"
+                        is UserCurrentStatus.InClass -> if (status.onTheWay) "En camino" else "Actividad en curso"
                         is UserCurrentStatus.Override -> "Estado compartido"
                         is UserCurrentStatus.Loading -> "Consultando"
                         is UserCurrentStatus.Error -> "Sin información"
@@ -72,7 +72,7 @@ fun HeroStatusCard(
                 }
             }
             val title = when (status) {
-                is UserCurrentStatus.InClass -> status.currentSchedule.title
+                is UserCurrentStatus.InClass -> status.headline
                 is UserCurrentStatus.Override -> status.customLocation
                 is UserCurrentStatus.Loading -> "Consultando actividad…"
                 is UserCurrentStatus.Error -> "Estado no disponible"

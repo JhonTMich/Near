@@ -550,7 +550,7 @@ private fun MyDay(state: AccountState, actions: AccountActions, onOpenSchedule: 
     status?.let { current ->
         val title = when (current) {
             is UserCurrentStatus.FreeTime -> "Estoy libre"
-            is UserCurrentStatus.InClass -> current.currentSchedule.title
+            is UserCurrentStatus.InClass -> current.headline
             is UserCurrentStatus.Override -> current.customLocation
             is UserCurrentStatus.Error -> "Estado no disponible"
             is UserCurrentStatus.Loading -> "Consultando actividad…"
@@ -1536,7 +1536,7 @@ private fun People(state: AccountState, actions: AccountActions) {
                     else contactStatus(person, state, schedules, state.othersStatuses.filter { it.userId == person.id })
                     val (shown, ink, background) = when (status) {
                         is UserCurrentStatus.FreeTime -> Triple("Libre ahora", FreeInk, FreeSurface)
-                        is UserCurrentStatus.InClass -> Triple("Ocupado · ${ActivityCategory.fromKey(status.currentSchedule.category,
+                        is UserCurrentStatus.InClass -> Triple("${if (status.onTheWay) "En camino" else "Ocupado"} · ${ActivityCategory.fromKey(status.currentSchedule.category,
                             status.currentSchedule.title).label}", BusyInk, BusySurface)
                         is UserCurrentStatus.Override -> Triple(status.customLocation, MaterialTheme.colorScheme.primary, AccentContainer)
                         is UserCurrentStatus.Error -> Triple(status.message, TextSecondary, InnerBg)
@@ -1802,7 +1802,7 @@ private fun GroupPanel(group: PersonGroup, state: AccountState, actions: Account
                 state.othersSchedules.filter { it.userId == person.id }, state.othersStatuses.filter { it.userId == person.id })
             val (line, color) = when (status) {
                 is UserCurrentStatus.Override -> status.customLocation to BrandSky
-                is UserCurrentStatus.InClass -> status.currentSchedule.title to ActivityCategory.fromKey(status.currentSchedule.category).accentColor
+                is UserCurrentStatus.InClass -> status.headline to ActivityCategory.fromKey(status.currentSchedule.category).accentColor
                 is UserCurrentStatus.Error -> status.message to TextMuted
                 else -> "Libre" to TextMuted
             }.let { (text, ink) -> listOfNotNull(text, status.place).joinToString(" · ") to ink }
