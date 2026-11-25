@@ -2099,7 +2099,9 @@ private fun AccountProfilePanel(state: AccountState, actions: AccountActions, up
         HorizontalDivider(color = CardBorder)
         AccountSettingsSwitch("Mensajes recibidos", "", state.settings.messages) { actions.setAlert(AccountAlert.Messages, it) }
         HorizontalDivider(color = CardBorder)
-        AccountSettingsSwitch("Antes de tus actividades", "", state.settings.reminders) { actions.setReminders(it) }
+        AccountSettingsSwitch("Antes de tus actividades",
+            "Y si a los ${com.example.findme.reminders.LateReminder.AFTER_MINUTES} min de una presencial aún no llegas a su lugar.",
+            state.settings.reminders) { actions.setReminders(it) }
         if (state.settings.reminders) {
             Choices(com.example.findme.data.local.REMINDER_CHOICES, state.settings.reminderMinutes, actions::setReminderMinutes) { minutes ->
                 if (minutes >= 60) "${minutes / 60} h antes" else "$minutes min antes"

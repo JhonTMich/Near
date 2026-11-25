@@ -18,7 +18,7 @@ object NotificationHelper {
         Activities("near_activities", "Actividades de tu gente", "Cuando una persona conectada comienza una actividad."),
         Statuses("findme_status_channel", "Estados de tu gente", "Cuando tu gente comparte, cambia o quita su estado."),
         Messages("findme_messages", "Mensajes de tu gente", "Mensajes rápidos, propuestas de planes y solicitudes de sincronización."),
-        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario."),
+        Reminders("near_reminders", "Recordatorios de tus actividades", "Un aviso antes de que empiece cada actividad de tu horario y si aún no llegas a una presencial."),
         Requested("near_requested", "Avisos que pediste", "Cuando alguien queda libre o responde a tu plan o solicitud de sincronización."),
         Alarms("near_alarms", "Alarmas de tus actividades", "La alarma que suena antes de una actividad cuando eliges el modo alarma.")
     }

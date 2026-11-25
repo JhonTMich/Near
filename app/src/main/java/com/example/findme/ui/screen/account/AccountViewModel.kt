@@ -525,6 +525,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             preferences.setReminders(id, enabled)
             com.example.findme.reminders.ActivityReminders.reschedule(getApplication())
+            runCatching { com.example.findme.reminders.LateReminder.schedule(getApplication()) }
         }
     }
     override fun setReminderMinutes(minutes: Int) {
