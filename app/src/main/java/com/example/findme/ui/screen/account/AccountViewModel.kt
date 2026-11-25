@@ -113,6 +113,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private var knownStatuses = mutableMapOf<String, String>()
     private var allSchedules: List<ScheduleDto> = emptyList()
     private var allStatuses: List<StatusOverrideDto> = emptyList()
+    private val cacheWrites = com.example.findme.data.local.SkipUnchanged<AccountSnapshot>()
+    private val widgetWrites = com.example.findme.data.local.SkipUnchanged<Triple<List<AccountProfile>, List<ScheduleDto>, List<StatusOverrideDto>>>()
     private val _state = MutableStateFlow(AccountState())
     val state = _state.asStateFlow()
 
@@ -130,6 +132,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                         recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
                     com.example.findme.widget.WidgetStore.clear(getApplication())
                     AccountCache.clear(getApplication())
+                    forgetWrites()
                 }
                 else if (_state.value.profile?.id != user.id) {
                     // A recovery link that was opened but never finished still demands the new password.
@@ -366,9 +369,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                         NotificationHelper.Reply(id, signal.senderId, messages.map { it.message }.filter { it.trim().length in 1..240 }.distinct().take(5)))
                 }
             }
-            if (complete || previous != null) saveCurrentCache()
+            // A reload that brought nothing new rewrites neither the cache nor the widget (and what hangs off it:
+            // reminders, attendance), unless the last write is old enough for its sync time to matter.
+            if (complete || previous != null) saveCurrentCache(onlyIfChanged = true)
             if (remoteSchedules != null && remoteStatuses != null && remoteConnections != null && remoteProfiles != null) {
-                publishWidgetSnapshot()
+                publishWidgetSnapshot(onlyIfChanged = true)
             }
             if (remoteSchedules != null && remoteStatuses != null && remotePreferences != null) updateStatusNotifications()
         }
@@ -382,13 +387,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun saveCurrentCache() {
+    private suspend fun saveCurrentCache(onlyIfChanged: Boolean = false) {
         val current = _state.value
         val profile = current.profile ?: return
-        saveCache(AccountSnapshot(profile.id, profile, current.profiles, allSchedules, allStatuses,
+        val snapshot = AccountSnapshot(profile.id, profile, current.profiles, allSchedules, allStatuses,
             current.connections, current.messages, current.signals, current.lastSync?.toString().orEmpty(),
-            current.preferences, current.pauses))
+            current.preferences, current.pauses)
+        val content = snapshot.copy(syncedAt = "")
+        if (onlyIfChanged && cacheWrites.unchanged(content)) return
+        saveCache(snapshot)
+        cacheWrites.wrote(content)
     }
+
+    /** The stored copies were removed, so the next reload must write them even with the same data. */
+    private fun forgetWrites() { cacheWrites.reset(); widgetWrites.reset() }
 
     private suspend fun saveCache(snapshot: AccountSnapshot) {
         try {
@@ -448,14 +460,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun publishWidgetSnapshot() {
+    private suspend fun publishWidgetSnapshot(onlyIfChanged: Boolean = false) {
         val profile = _state.value.profile ?: return
         if (repository.auth.currentUserOrNull()?.id != profile.id) return
+        val profiles = _state.value.profiles.filterNot { it.id == profile.id } + profile
+        val content = Triple(profiles, allSchedules, allStatuses)
+        if (onlyIfChanged && widgetWrites.unchanged(content)) return
         try {
-            com.example.findme.widget.WidgetStore.publish(getApplication(), profile.id,
-                _state.value.profiles.filterNot { it.id == profile.id } + profile, allSchedules, allStatuses) {
+            com.example.findme.widget.WidgetStore.publish(getApplication(), profile.id, profiles, allSchedules, allStatuses) {
                 repository.auth.currentUserOrNull()?.id == profile.id
             }
+            widgetWrites.wrote(content)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { android.util.Log.w("AccountViewModel", "Widget update failed", error) }
     }
@@ -576,6 +591,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.value = AccountState(initializing = false,
             recoveryEmailSent = _state.value.recoveryEmailSent, confirmationSentAt = _state.value.confirmationSentAt)
         com.example.findme.widget.WidgetStore.clear(getApplication())
+        forgetWrites()
     }
     override fun saveSchedules(draftId: String, activities: List<ScheduleDto>) {
         perform {
@@ -933,6 +949,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     personStatuses = if (wasSelected) emptyList() else old.personStatuses)
             }
             readSection("local cache after disconnecting") { AccountCache.clear(getApplication()) }
+            cacheWrites.reset()
             publishWidgetSnapshot()
         }
         refreshAfterSave("Conexión eliminada.")
@@ -1005,6 +1022,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         forgetAutoPlaces(owner)
         _state.value = AccountState(initializing = false, notice = "Tu cuenta y tus datos se eliminaron.")
         com.example.findme.widget.WidgetStore.clear(getApplication())
+        forgetWrites()
     }
     override fun exportData(): String? {
         val state = _state.value
