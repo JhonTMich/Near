@@ -18,6 +18,7 @@ import com.example.findme.data.network.SupabaseClientProvider
 import com.example.findme.data.repository.AccountRepository
 import com.example.findme.widget.GlanceWidgetWorker
 import com.example.findme.widget.WidgetStore
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
 import com.google.android.gms.location.GeofencingRequest
@@ -194,15 +195,40 @@ object AutoPlaces {
     /** After a reboot or an update the system forgets the geofences; the cached account says whose to restore. */
     suspend fun restore(context: Context) = register(context, WidgetStore.data(context)?.owner)
 
+    /** A precise fix, to save a place where the phone is now. */
+    suspend fun currentLocation(context: Context): Location? = locate(context, Priority.PRIORITY_HIGH_ACCURACY, maxAgeMs = 0)
+
+    /** A fix accurate enough to tell the smallest zone apart; worse than this, the GPS is asked instead. */
+    const val CHECK_ACCURACY_M = 100f
+    /** A fix this recent, even from another app, is reused without turning on any radio. */
+    const val CHECK_MAX_AGE_MS = 2 * 60_000L
+    /** How often the location is checked while Near is open. */
+    const val VISIBLE_CHECK_MS = 5 * 60_000L
+
+    /** [accuracy] in metres, null when the fix has none. */
+    fun goodEnoughToCheck(accuracy: Float?) = accuracy != null && accuracy <= CHECK_ACCURACY_M
+
+    /**
+     * A fix to check which saved places the phone is in. Wi-Fi and cell towers first, which cost much less
+     * than the GPS and are enough for zones of 100 m or more; the GPS only when they are not accurate enough.
+     */
+    suspend fun checkLocation(context: Context): Location? =
+        locate(context, Priority.PRIORITY_BALANCED_POWER_ACCURACY, CHECK_MAX_AGE_MS)
+            ?.takeIf { goodEnoughToCheck(if (it.hasAccuracy()) it.accuracy else null) }
+            // A fresh one: a cached fix here could be the same inaccurate one just rejected.
+            ?: locate(context, Priority.PRIORITY_HIGH_ACCURACY, maxAgeMs = 0)
+
     @SuppressLint("MissingPermission")
-    suspend fun currentLocation(context: Context): Location? {
+    private suspend fun locate(context: Context, priority: Int, maxAgeMs: Long): Location? {
         if (!hasLocation(context)) return null
         val client = LocationServices.getFusedLocationProviderClient(context)
+        val request = CurrentLocationRequest.Builder().setPriority(priority)
+            .setMaxUpdateAgeMillis(maxAgeMs).setDurationMillis(15_000).build()
         return withTimeoutOrNull(15_000) {
             suspendCancellableCoroutine { continuation ->
                 val cancel = CancellationTokenSource()
                 continuation.invokeOnCancellation { cancel.cancel() }
-                client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cancel.token)
+                client.getCurrentLocation(request, cancel.token)
                     .addOnSuccessListener { continuation.resume(it) }
                     .addOnFailureListener { continuation.resume(null) }
             }
@@ -366,7 +392,7 @@ object AutoPlaces {
             return true
         }
         if (!locate) return true
-        val here = currentLocation(context) ?: return false
+        val here = checkLocation(context) ?: return false
         setInside(context, owner, detectedPlaces(saved) { place ->
             FloatArray(1).also { Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, it) }[0]
         })

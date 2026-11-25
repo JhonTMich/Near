@@ -68,6 +68,14 @@ class AutoPlacesTest {
         assertEquals(Change.Share("En la universidad", "uni"), desired(inside.toList(), marker = "home"))
     }
 
+    @Test fun aWifiFixIsEnoughOnlyWhenItCanTellTheSmallestZoneApart() {
+        assertTrue(AutoPlaces.goodEnoughToCheck(35f))
+        assertTrue(AutoPlaces.goodEnoughToCheck(AutoPlaces.CHECK_ACCURACY_M))
+        assertFalse(AutoPlaces.goodEnoughToCheck(600f))
+        assertFalse(AutoPlaces.goodEnoughToCheck(null))
+        assertTrue(AutoPlaces.CHECK_ACCURACY_M <= AutoPlaces.RADIUS_CHOICES.min())
+    }
+
     @Test fun placesRoundTripAndBadDataIsIgnored() {
         val places = listOf(home, AutoPlace("uni", "En la universidad", -12.07, -77.08, 200f))
         assertEquals(places, AutoPlaces.decode(AutoPlaces.encode(places)))
