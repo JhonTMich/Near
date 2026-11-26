@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.findme.R
+import com.example.findme.util.NotificationStyle.near
 
 object NotificationHelper {
     const val OPEN_PEOPLE = "com.example.findme.OPEN_PEOPLE"
@@ -70,16 +71,28 @@ object NotificationHelper {
 
     fun show(context: Context, channel: Channel, id: Int, title: String, text: String, reply: Reply? = null, alertAgain: Boolean = false) {
         createNotificationChannel(context)
+        val target = open(context, if (channel == Channel.Reminders) OPEN_SCHEDULE else OPEN_PEOPLE)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(open(context, if (channel == Channel.Reminders) OPEN_SCHEDULE else OPEN_PEOPLE))
+            // A message that can be answered reads like a chat, with who sent it; the rest as plain text.
+            .setStyle(if (reply != null) chat(context, channel, title, text) else NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(target)
             .setOnlyAlertOnce(!alertAgain).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(if (channel == Channel.Messages) NotificationCompat.CATEGORY_MESSAGE else if (channel == Channel.Reminders) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
+            .near(context, channel, title)
             .apply { reply?.let { addAction(replyAction(context, id, it)) } }
             .build()
         try { (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.notify(id, notification) }
         catch (_: SecurityException) { }
+        NotificationStyle.summarize(context, channel, target, NotificationStyle.Line(id, title, text, System.currentTimeMillis()))
+    }
+
+    private fun chat(context: Context, channel: Channel, sender: String, text: String): NotificationCompat.MessagingStyle {
+        val person = androidx.core.app.Person.Builder().setName(sender).setKey(sender)
+            .setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(
+                NotificationStyle.avatar(context, NotificationStyle.color(channel), NotificationStyle.initial(sender)))).build()
+        return NotificationCompat.MessagingStyle(androidx.core.app.Person.Builder().setName("Tú").build())
+            .addMessage(text, System.currentTimeMillis(), person)
     }
 
     fun showMessageNotification(context: Context, id: String, sender: String, message: String, reply: Reply? = null) =
