@@ -41,11 +41,7 @@ class NotificationStyleTest {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         automation.executeShellCommand("cmd statusbar expand-notifications").close()
         Thread.sleep(5_000)
-        automation.takeScreenshot()?.let { shot ->
-            java.io.File(context.cacheDir, "notifications.png").outputStream().use {
-                shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-            }
-        }
+        automation.takeScreenshot()?.let { TestScreenshots.save("notifications", it) }
         automation.executeShellCommand("cmd statusbar collapse").close()
     }
 }

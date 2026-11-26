@@ -29,10 +29,7 @@ class AppUpdateDialogUiTest {
 
     private fun screenshot(name: String) {
         compose.waitForIdle()
-        val dir = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
-        compose.onAllNodes(isDialog()).onFirst().captureToImage().asAndroidBitmap().let { bitmap ->
-            File(dir, "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-        }
+        TestScreenshots.save(name, compose.onAllNodes(isDialog()).onFirst().captureToImage().asAndroidBitmap())
     }
 
     @Test fun showsShortNewsThatOpenOnATap() {

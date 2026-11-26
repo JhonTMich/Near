@@ -23,11 +23,7 @@ class MonitorUiTest {
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
-            File(instrumentation.targetContext.cacheDir, "$name.png").outputStream().use {
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-            }
-        }
+        TestScreenshots.save(name, compose.onRoot().captureToImage().asAndroidBitmap())
     }
     @Test fun freeTimeDoesNotClaimAConfirmedLocation() {
         compose.setContent { NearTheme { Surface(Modifier.fillMaxSize().background(com.example.findme.ui.theme.AppBackground).safeDrawingPadding()) {
