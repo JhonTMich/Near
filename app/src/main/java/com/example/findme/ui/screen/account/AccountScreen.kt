@@ -1698,8 +1698,16 @@ private fun ScheduleFollowPanel(person: AccountProfile, state: AccountState, act
 
     when {
         outgoing?.leaderId == person.id && outgoing.approved -> Panel {
-            Text("Horario de ${person.displayName}")
-            Button(onClick = { showActivities = true }, enabled = !state.busy && sharesSchedule) {
+            val following = state.schedules.count { it.sourceId != null && it.sourceOwnerId == person.id }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                IconBubble(Icons.Default.Sync)
+                Column(Modifier.weight(1f)) {
+                    Text("Sincronizado con ${person.displayName}", fontWeight = FontWeight.Bold)
+                    Text(if (following == 0) "Aún no eliges actividades" else "$following ${if (following == 1) "actividad" else "actividades"} en tu horario",
+                        color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Button(onClick = { showActivities = true }, enabled = !state.busy && sharesSchedule, modifier = Modifier.fillMaxWidth()) {
                 Text("Elegir actividades")
             }
             TextButton(onClick = { showDetach = true }, enabled = !state.busy) {
