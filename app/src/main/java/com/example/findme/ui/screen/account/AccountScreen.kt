@@ -1720,29 +1720,12 @@ private fun ScheduleFollowPanel(person: AccountProfile, state: AccountState, act
     }
 
     if (showActivities && outgoing?.approved == true && outgoing.leaderId == person.id && sharesSchedule) {
-        Sheet({ showActivities = false }, "Actividades de ${person.displayName}", "Elige cuáles quieres ver en tu horario.") {
-            val chosen = state.schedules.mapNotNull { it.sourceId }.toSet()
+        Sheet({ showActivities = false }, "Horario de ${person.displayName}", "Elige qué ver en tu horario y aplica.") {
+            val saved = remember(state.schedules) { state.schedules.mapNotNull { it.sourceId }.toSet() }
             val choices = state.personSchedules.filter { it.sourceId == null }
-                .sortedWith(compareBy({ it.dayOfWeek }, { it.startTime }))
-            if (choices.isEmpty()) Text("No hay actividades para sincronizar.")
-            choices.forEach { activity ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = activity.id in chosen,
-                        onCheckedChange = { actions.selectFollowedActivity(outgoing.id, activity.id, it) },
-                        enabled = !state.busy
-                    )
-                    Column {
-                        Text(activity.title)
-                        Text(
-                            "${activity.oneOffDate ?: days[activity.dayOfWeek - 1]} · ${activity.startTime.take(5)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                }
-            }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            FollowActivitiesView(choices, saved, state.busy, state.error,
+                onApply = { add, remove -> actions.applyFollowedActivities(outgoing.id, add, remove) },
+                onDone = { showActivities = false })
         }
     }
 

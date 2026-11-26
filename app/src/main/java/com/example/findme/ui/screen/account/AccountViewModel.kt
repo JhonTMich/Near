@@ -979,9 +979,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         refreshAfterSave("Sincronización finalizada.")
     }
 
-    override fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) = perform {
-        repository.selectFollowedActivity(requestId, sourceId, selected)
-        refreshAfterSave()
+    override fun applyFollowedActivities(requestId: String, add: Set<String>, remove: Set<String>) = perform {
+        if (add.isEmpty() && remove.isEmpty()) return@perform
+        repository.applyFollowedActivities(requestId, add, remove)
+        refreshAfterSave(followedChangeNotice(add.size, remove.size))
     }
 
     override fun selectPerson(profile: AccountProfile) = perform {

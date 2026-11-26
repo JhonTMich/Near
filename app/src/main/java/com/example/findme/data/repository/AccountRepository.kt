@@ -109,18 +109,20 @@ class AccountRepository {
         }
     }
 
-    suspend fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) {
+    /** Applies a whole selection at once: one insert for [add] and one delete for [remove]. */
+    suspend fun applyFollowedActivities(requestId: String, add: Collection<String>, remove: Collection<String>) {
         val table = client.postgrest["followed_schedule_activities"]
-        if (selected) {
-            table.upsert(buildJsonObject {
+        if (add.isNotEmpty()) table.upsert(add.map { sourceId ->
+            buildJsonObject {
                 put("request_id", requestId)
                 put("source_id", sourceId)
-            }) {
-                onConflict = "request_id,source_id"
-                ignoreDuplicates = true
             }
-        } else {
-            table.delete { filter { eq("request_id", requestId); eq("source_id", sourceId) } }
+        }) {
+            onConflict = "request_id,source_id"
+            ignoreDuplicates = true
+        }
+        if (remove.isNotEmpty()) table.delete {
+            filter { eq("request_id", requestId); isIn("source_id", remove.toList()) }
         }
     }
 

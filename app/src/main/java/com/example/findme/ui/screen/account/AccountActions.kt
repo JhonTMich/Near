@@ -77,7 +77,8 @@ interface AccountActions {
     fun requestScheduleFollow(leaderId: String) {}
     fun approveScheduleFollow(id: String) {}
     fun endScheduleFollow(id: String, keepAll: Boolean?) {}
-    fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) {}
+    /** Saves the activities chosen in the sheet, only when the person applies them. */
+    fun applyFollowedActivities(requestId: String, add: Set<String>, remove: Set<String>) {}
     fun selectPerson(profile: AccountProfile) {}
     fun saveMessage(label: String, message: String) {}
     fun deleteMessage(id: String) {}
