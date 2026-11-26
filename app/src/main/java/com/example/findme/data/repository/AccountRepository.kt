@@ -109,18 +109,20 @@ class AccountRepository {
         }
     }
 
-    suspend fun selectFollowedActivity(requestId: String, sourceId: String, selected: Boolean) {
+    /** Applies a whole selection at once: one insert for [add] and one delete for [remove]. */
+    suspend fun applyFollowedActivities(requestId: String, add: Collection<String>, remove: Collection<String>) {
         val table = client.postgrest["followed_schedule_activities"]
-        if (selected) {
-            table.upsert(buildJsonObject {
+        if (add.isNotEmpty()) table.upsert(add.map { sourceId ->
+            buildJsonObject {
                 put("request_id", requestId)
                 put("source_id", sourceId)
-            }) {
-                onConflict = "request_id,source_id"
-                ignoreDuplicates = true
             }
-        } else {
-            table.delete { filter { eq("request_id", requestId); eq("source_id", sourceId) } }
+        }) {
+            onConflict = "request_id,source_id"
+            ignoreDuplicates = true
+        }
+        if (remove.isNotEmpty()) table.delete {
+            filter { eq("request_id", requestId); isIn("source_id", remove.toList()) }
         }
     }
 
@@ -358,12 +360,18 @@ class AccountRepository {
     }
 
     /** Where you are now («En casa»): shown next to your activity or status, never instead of it. */
-    suspend fun setPlace(label: String, minutes: Long) {
+    suspend fun setPlace(label: String, minutes: Long, awayFrom: List<String>? = null) {
         require(label.trim().length in 1..60)
         require(minutes in 1..4320)
         val id = userId()
-        client.postgrest["current_place"].upsert(CurrentPlaceDto(id, label.trim(),
-            Instant.now().plusSeconds(minutes * 60).toString()))
+        val place = CurrentPlaceDto(id, label.trim(), Instant.now().plusSeconds(minutes * 60).toString(), awayFrom)
+        try {
+            client.postgrest["current_place"].upsert(place)
+        } catch (error: PostgrestRestException) {
+            // A server without `away_from` yet still gets the place.
+            if (error.code != "PGRST204" || place.awayFrom == null) throw error
+            client.postgrest["current_place"].upsert(place.copy(awayFrom = null))
+        }
     }
 
     suspend fun clearPlace() {

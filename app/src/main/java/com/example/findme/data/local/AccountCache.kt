@@ -2,7 +2,6 @@ package com.example.findme.data.local
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import com.example.findme.data.model.*
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
@@ -28,7 +27,7 @@ data class AccountSnapshot(
 
 /** Kept on the device only (excluded from backups) and removed when the session ends. */
 object AccountCache {
-    private val key = stringPreferencesKey("account_cache_v1")
+    private val key = accountCacheKey
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     fun decode(value: String?, owner: String): AccountSnapshot? = value
@@ -38,12 +37,12 @@ object AccountCache {
     fun encode(snapshot: AccountSnapshot): String = json.encodeToString(AccountSnapshot.serializer(), snapshot)
 
     suspend fun save(context: Context, snapshot: AccountSnapshot) {
-        context.dataStore.edit { it[key] = encode(snapshot) }
+        context.accountCacheStore.edit { it[key] = encode(snapshot) }
     }
 
-    suspend fun load(context: Context, owner: String): AccountSnapshot? = decode(context.dataStore.data.first()[key], owner)
+    suspend fun load(context: Context, owner: String): AccountSnapshot? = decode(context.accountCacheStore.data.first()[key], owner)
 
     suspend fun clear(context: Context) {
-        context.dataStore.edit { it.remove(key) }
+        context.accountCacheStore.edit { it.remove(key) }
     }
 }

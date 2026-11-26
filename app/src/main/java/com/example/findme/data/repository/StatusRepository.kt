@@ -33,7 +33,8 @@ object StatusRepository {
         val current = overrides.filter { overrideDto ->
             overrideDto.isActive && parseIsoToInstant(overrideDto.expiresAt)?.isAfter(nowInLima.toInstant()) == true
         }
-        val place = current.firstOrNull { it.isPlace }?.customLocation?.trim()?.takeIf { it.isNotEmpty() }
+        val placeStatus = current.firstOrNull { it.isPlace }
+        val place = placeStatus?.customLocation?.trim()?.takeIf { it.isNotEmpty() }
         // Older versions wrote automatic place labels into personal_status. A live place supersedes
         // those location-only labels, so "En casa" cannot hide today's work and contradict the fix.
         // Activity announcements such as "Estudiando" still take precedence over the schedule.
@@ -68,7 +69,8 @@ object StatusRepository {
                 progress = progress,
                 place = place,
                 selectedDayOfWeek = selectedDayOfWeek,
-                todaySchedules = daySchedules
+                todaySchedules = daySchedules,
+                onTheWay = onTheWay(currentSchedule, placeStatus?.takeIf { place != null })
             )
         }
 
@@ -80,6 +82,13 @@ object StatusRepository {
             todaySchedules = daySchedules
         )
     }
+
+    /**
+     * An in-person activity whose category the shared place says the person is away from: they have a saved
+     * place for it and are not there yet. A virtual one can be attended from anywhere, so it never is.
+     */
+    internal fun onTheWay(schedule: ScheduleDto, place: StatusOverrideDto?): Boolean =
+        schedule.modality != "virtual" && place?.awayFrom?.contains(schedule.category) == true
 
     fun parseLocalTimeOrNull(timeStr: String): LocalTime? {
         val normalized = timeStr.trim().let { value ->

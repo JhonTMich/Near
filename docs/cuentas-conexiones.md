@@ -114,6 +114,15 @@ El propietario configuró Gmail SMTP desde el panel de Supabase, con contraseña
 
 En **Authentication → Email → SMTP Settings**, configurar un proveedor SMTP y un remitente autorizado por ese proveedor. Mantener **Confirm Email** activado y **Allow new users to sign up** activado. En **URL Configuration**, definir `findme://auth/confirmed` como **Site URL** y añadir exactamente la misma dirección a **Redirect URLs**. Para recuperar la contraseña, añadir también `findme://auth/reset` a **Redirect URLs**; sin ella, Auth envía el enlace a la Site URL y la app lo trata como una confirmación de registro. El propietario confirmó que guardó ambas opciones. Instalar la nueva compilación antes de pedir el correo: las versiones anteriores no reconocen ese enlace.
 
+#### Remitente y plantillas
+
+El remitente y las plantillas no salen del repositorio: Supabase usa lo guardado en su panel.
+
+- **Remitente:** en **Authentication → Emails → SMTP Settings**, `Sender email` es `near.supporter@gmail.com` y `Sender name` es `Near`. El `Username` del SMTP de Gmail es esa misma dirección, y sirve la contraseña de aplicación de siempre porque es la misma cuenta. `findmesupporter@gmail.com` quedó como dirección adicional.
+- **Plantillas:** `supabase/templates/confirmation.html` y `recovery.html` son la referencia. Al cambiarlas, se copia su HTML y el asunto de `supabase/config.toml` en **Authentication → Emails → Templates** (Confirm signup y Reset password). No usar `supabase config push` para esto: también subiría los valores por defecto de `config.toml` para la Site URL y las Redirect URLs, y rompería los enlaces `findme://`.
+- **Icono:** las plantillas enlazan `app/src/main/ic_launcher-playstore.png` fijado a un commit, para que un cambio posterior no altere los correos ya enviados. Si cambia el icono, se regenera ese PNG y se actualiza el enlace.
+- **Foto del remitente en Gmail:** es la foto de perfil de la cuenta de Google que envía, no algo de Near ni de Supabase.
+
 El SMTP integrado de Supabase solo entrega a miembros del equipo del proyecto; esa restricción es independiente de `signup_allowed_emails`. Añadir un correo a la tabla no cambia los destinatarios admitidos por ese servicio. Documentación: https://supabase.com/docs/guides/auth/auth-smtp
 
 ### Validación en servidor

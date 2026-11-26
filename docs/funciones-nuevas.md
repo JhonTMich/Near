@@ -45,6 +45,13 @@ La app funciona aunque falten las migraciones: cada sección nueva se lee por se
   - Al activar la opción se comprueba la ubicación actual; al desactivarla, o al quitar el último lugar, se retira solo «En la calle».
 - Todo esto es local: no hay migraciones ni cambios en Supabase. Solo cambia cuándo la app llama a los estados que ya existían.
 
+### «Yendo a …» y aviso de tardanza
+
+- Junto al lugar, el teléfono comparte en `current_place.away_from` las categorías de actividad (`university`, `work`) de las que tiene un lugar guardado y en cuyo lugar no está ahora. No viajan coordenadas.
+- Durante una actividad **presencial** de una de esas categorías, la app y el widget muestran «Yendo a IoT · Empezó a las 3:00» en lugar de «En clase». Al llegar a su lugar pasa a la actividad normal. Las actividades **virtuales**, y las de una categoría sin lugar guardado, nunca cambian.
+- Requiere la migración `lugar_actual_categorias_pendientes`. Sin ella el lugar se sigue enviando sin la columna, y las versiones anteriores de la app la ignoran y muestran la actividad como antes.
+- **Aviso de tardanza (solo para ti):** con «Antes de tus actividades» activado, a los 5 min de empezar una actividad presencial con lugar llega «IoT empezó hace 5 min · Aún no llegas a «En la universidad»». Antes de avisar se comprueba la ubicación, si hay permiso «Todo el tiempo». No se registra como tardanza en la asistencia.
+
 ## Pruebas
 
 - Base de datos (PGlite, sin conexión al proyecto): `test_schedule_pauses`, `test_one_off_activities`, `test_free_alerts`, `test_plan_proposals` y `test_person_groups`, sobre `scripts/schema_harness.mjs`, que aplica todas las migraciones y simula Vault y pg_net.

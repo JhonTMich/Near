@@ -9,6 +9,7 @@ import com.example.findme.ui.screen.account.AccountActions
 import com.example.findme.ui.screen.account.AccountContent
 import com.example.findme.ui.screen.account.AccountState
 import com.example.findme.ui.theme.NearTheme
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.Assert.*
 import org.junit.Rule
@@ -16,8 +17,10 @@ import org.junit.Test
 
 class PlanCancellationUiTest {
     @get:Rule val compose = createComposeRule()
-    private val now = ZonedDateTime.now()
     private val own = AccountProfile("me", "Yo", username = "prueba")
+    // The screen shows the day in the profile's zone; with the device's (UTC in CI) the plan lands on
+    // another date between midnight UTC and midnight in Lima, and the schedule hides it.
+    private val now = ZonedDateTime.now(ZoneId.of(own.timezone))
     private val plan = PlanProposal("shared-plan", "other", "me", "Comer juntos",
         startsAt = now.minusMinutes(1).toInstant().toString(), endsAt = now.plusHours(1).toInstant().toString(),
         status = "accepted", senderScheduleId = "other-copy", recipientScheduleId = "my-copy")

@@ -26,13 +26,14 @@ class UpdateFlowTest {
             AppUpdateDialog(state, onUpdate = { state = state.copy(downloading = true, progress = .42f, message = "Descargando actualización…") },
                 onLater = { state = state.copy(showDialog = false) }, onCancelDownload = { state = state.copy(showDialog = false) })
         } }
-        compose.onNodeWithText("Actualizar").performClick()
-        compose.onNodeWithText("Actualizando Near").assertIsDisplayed()
+        compose.onNodeWithText("Actualizar ahora").performClick()
+        compose.onNodeWithText("Descargando…").assertIsDisplayed()
         compose.onNodeWithText("42%").assertIsDisplayed()
-        compose.onNodeWithText("Actualización disponible").assertDoesNotExist()
+        // While downloading, only the progress: no offer and no notes.
+        compose.onNodeWithText("Actualizar ahora").assertDoesNotExist()
         compose.onNodeWithText("Ver actualización").assertDoesNotExist()
         compose.onNodeWithText("Cancelar").performClick()
-        compose.onNodeWithText("Actualizando Near").assertDoesNotExist()
+        compose.onNodeWithText("Descargando…").assertDoesNotExist()
     }
     @Test fun validatesThePackageVersionAndCertificateBeforeInstallation() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

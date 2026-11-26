@@ -43,6 +43,8 @@ object WidgetStore {
         GlanceWidgetWorker.enqueueBoundaryUpdate(context)
         // The reminder before your next activity follows the schedule saved here.
         com.example.findme.reminders.ActivityReminders.reschedule(context)
+        // And the warning when you have not reached an activity that already started.
+        runCatching { com.example.findme.reminders.LateReminder.schedule(context) }
         // So does the next attendance check; it only reads this cache.
         runCatching { com.example.findme.attendance.AttendanceTracker.check(context) }
     }
@@ -52,6 +54,7 @@ object WidgetStore {
         androidx.work.WorkManager.getInstance(context).cancelUniqueWork("WidgetStatusBoundary")
         com.example.findme.reminders.ActivityReminders.cancel(context)
         com.example.findme.reminders.ReminderAlarm.cancel(context)
+        com.example.findme.reminders.LateReminder.cancel(context)
         com.example.findme.attendance.AttendanceCheckWorker.cancel(context)
         NearWidgets.updateAll(context)
     }

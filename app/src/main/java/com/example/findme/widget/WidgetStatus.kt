@@ -80,7 +80,14 @@ fun widgetStatus(name: String, schedules: List<ScheduleDto>, statuses: List<Stat
         "${schedule.title} · $day${formatScheduleTime(schedule.startTime)}"
     } ?: "Libre · de relajo"
     return placed(state.place, when (state) {
-        is UserCurrentStatus.InClass -> {
+        // Not at its place yet: on the way, with when it started instead of when it ends.
+        is UserCurrentStatus.InClass -> if (state.onTheWay) {
+            val schedule = state.currentSchedule
+            WidgetStatus(state.headline,
+                "Empezó a las ${formatScheduleTime(schedule.startTime)}" +
+                    schedule.location.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(), next,
+                WidgetScene.STREET, "En camino")
+        } else {
             val schedule = state.currentSchedule
             val end = schedule.activeWindow(now)?.end
             val tomorrow = if (end?.toLocalDate()?.isAfter(now.toLocalDate()) == true) " de mañana" else ""

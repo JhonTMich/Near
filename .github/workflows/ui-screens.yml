@@ -1,0 +1,99 @@
+name: UI screens
+
+# Runs the instrumented tests on emulators in the cloud and publishes their screenshots, so screens can be
+# checked without running an emulator locally. Start it from Actions → «UI screens» → Run workflow (choosing
+# the branch), or with: gh workflow run ui-screens.yml --ref <branch> -f tests=com.example.findme.AlarmScreenUiTest
+# Manual runs only appear once this file is on the default branch; until then, and for any pull request,
+# adding the «capturas» label runs it on that pull request.
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: Test classes to run, comma separated (empty runs them all)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-screens-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screens:
+    name: Screens on ${{ matrix.device.name }}
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'capturas'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        device:
+          - { name: phone, profile: pixel_6 }
+          - { name: tablet, profile: pixel_tablet }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Install the exact Android SDK used by the project
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.1' 'build-tools;36.0.0'
+      - name: Enable hardware acceleration for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the tests and collect the screenshots
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          TESTS: ${{ inputs.tests }}
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.device.profile }}
+          disable-animations: true
+          script: |
+            chmod +x gradlew
+            filter=""; if [ -n "$TESTS" ]; then filter="-Pandroid.testInstrumentationRunnerArguments.class=$TESTS"; fi
+            ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain $filter || echo "failed" > "$RUNNER_TEMP/tests-failed"
+            adb pull /sdcard/Pictures/NearTests "$RUNNER_TEMP/near-screens" || true
+      - name: Summarize
+        if: always()
+        run: |
+          count=$(find "$RUNNER_TEMP/near-screens" -name '*.png' 2>/dev/null | wc -l)
+          {
+            echo "### ${{ matrix.device.name }}: $count capturas"
+            find "$RUNNER_TEMP/near-screens" -name '*.png' -printf '- %f\n' 2>/dev/null | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: near-screens-${{ matrix.device.name }}
+          path: ${{ runner.temp }}/near-screens
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: near-test-report-${{ matrix.device.name }}
+          path: |
+            app/build/outputs/androidTest-results/connected/debug
+            app/build/reports/androidTests/connected/debug
+          if-no-files-found: warn
+          retention-days: 7
+      # The screenshots are published even when a test fails; the job still reports the failure.
+      - name: Fail if a test failed
+        run: test ! -f "$RUNNER_TEMP/tests-failed"

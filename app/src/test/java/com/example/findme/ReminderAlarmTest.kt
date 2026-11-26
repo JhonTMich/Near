@@ -15,6 +15,16 @@ class ReminderAlarmTest {
     private val now = Instant.parse("2026-11-17T13:00:00Z")
     private fun minutesLater(minutes: Long) = now.plusSeconds(minutes * 60).toEpochMilli()
 
+    @Test fun theAlarmScreenSaysWhenTheActivityStarts() {
+        val label = { at: Long -> com.example.findme.reminders.startsLabel(at, now)?.substringBefore(" · ") }
+        assertEquals("Empieza en 10 min", label(minutesLater(10)))
+        assertEquals("Empieza en 1 h 30 min", label(minutesLater(90)))
+        assertEquals("Empieza en 2 h", label(minutesLater(120)))
+        assertEquals("Empieza ahora", label(minutesLater(0)))
+        // A test ring has no activity behind it.
+        assertNull(com.example.findme.reminders.startsLabel(0, now))
+    }
+
     @Test fun alarmModeIsOptionalAndUsesTheSystemDefaults() {
         val settings = AccountSettings()
         assertFalse(settings.reminderAlarm)

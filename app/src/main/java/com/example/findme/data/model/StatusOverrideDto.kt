@@ -20,7 +20,9 @@ data class StatusOverrideDto(
     @SerialName("expires_at") val expiresAt: String,
     @SerialName("created_at") val createdAt: String? = null,
     /** Never sent to `personal_status`, which has no such column; kept in the local cache for places. */
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val kind: String = STATUS
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val kind: String = STATUS,
+    /** Of a place only: the activity categories with a saved place the person is not in now. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("away_from") val awayFrom: List<String>? = null
 ) {
     val isPlace: Boolean get() = kind == PLACE
 
@@ -31,12 +33,18 @@ data class StatusOverrideDto(
 }
 
 /** A row of `current_place`: where the person is now, from their saved places. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class CurrentPlaceDto(
     @SerialName("user_id") val userId: String,
     val label: String,
-    @SerialName("expires_at") val expiresAt: String
+    @SerialName("expires_at") val expiresAt: String,
+    /**
+     * The activity categories with a saved place the person is not in now («university» while at home), so an
+     * in-person activity of that category shows as on the way. Omitted when null, for servers without it.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("away_from") val awayFrom: List<String>? = null
 ) {
     fun asStatus() = StatusOverrideDto(id = userId, userId = userId, isActive = true, customLocation = label,
-        expiresAt = expiresAt, kind = StatusOverrideDto.PLACE)
+        expiresAt = expiresAt, kind = StatusOverrideDto.PLACE, awayFrom = awayFrom)
 }
