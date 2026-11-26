@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.example.findme.R
+import com.example.findme.util.NotificationStyle.near
 import com.example.findme.data.network.SupabaseClientProvider
 import com.example.findme.data.repository.AccountRepository
 import com.example.findme.domain.model.EndEarly
@@ -48,7 +49,8 @@ object EndEarlyPrompt {
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body)).setAutoCancel(true)
             .setContentIntent(NotificationHelper.openSchedule(context)).setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .addAction(R.drawable.ic_notification, "Terminar ahora", end))
+            .addAction(R.drawable.ic_notification, "Terminar ahora", end)
+            .near(context, NotificationHelper.Channel.Reminders, stack = false))
     }
 
     internal fun post(context: Context, id: Int, builder: NotificationCompat.Builder) {
@@ -98,7 +100,8 @@ class EndEarlyReceiver : BroadcastReceiver() {
                         .setSmallIcon(R.drawable.ic_notification).setAutoCancel(true)
                         .setContentIntent(NotificationHelper.openSchedule(app))
                         .setContentTitle(if (ended) "Actividad terminada por hoy" else "No se pudo terminar la actividad")
-                        .setContentText(if (ended) "Tu gente te verá libre. Puedes restaurarla en Horario." else "Abre Near para terminarla desde Hoy."))
+                        .setContentText(if (ended) "Tu gente te verá libre. Puedes restaurarla en Horario." else "Abre Near para terminarla desde Hoy.")
+                        .near(app, NotificationHelper.Channel.Reminders, stack = false))
             } finally { pending.finish() }
         }
     }

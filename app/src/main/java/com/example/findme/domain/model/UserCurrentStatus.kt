@@ -27,8 +27,13 @@ sealed interface UserCurrentStatus {
         val progress: Float, // 0.0f to 1.0f
         override val selectedDayOfWeek: Int,
         override val todaySchedules: List<ScheduleDto>,
-        override val place: String? = null
-    ) : UserCurrentStatus
+        override val place: String? = null,
+        /** In person and the phone has not reached any of its saved places yet: on the way, or late. */
+        val onTheWay: Boolean = false
+    ) : UserCurrentStatus {
+        /** «Yendo a IoT» while on the way, the activity's title once there. */
+        val headline: String get() = if (onTheWay) "Yendo a ${currentSchedule.title}" else currentSchedule.title
+    }
 
     data class FreeTime(
         override val displayName: String,

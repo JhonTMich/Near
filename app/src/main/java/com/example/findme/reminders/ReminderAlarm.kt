@@ -27,6 +27,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.findme.R
+import com.example.findme.util.NotificationStyle.near
 import com.example.findme.data.local.AccountSettings
 import com.example.findme.data.local.AccountSettingsRepository
 import com.example.findme.util.NotificationHelper
@@ -232,6 +233,7 @@ class ReminderAlarmService : Service() {
             .setContentIntent(screen).setFullScreenIntent(screen, true)
             .apply { if (ringing.snoozeUntil != null) addAction(R.drawable.ic_notification, "Posponer ${ringing.snoozeMinutes} min", action(ReminderAlarm.ACTION_SNOOZE, 7104)) }
             .addAction(R.drawable.ic_notification, "Detener", action(ReminderAlarm.ACTION_STOP, 7105))
+            .near(this, NotificationHelper.Channel.Alarms, stack = false)
             .build()
     }
 
