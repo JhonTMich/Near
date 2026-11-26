@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import com.example.findme.R
+import com.example.findme.util.NotificationStyle.near
 import com.example.findme.data.local.AccountCache
 import com.example.findme.data.network.SupabaseClientProvider
 import com.example.findme.data.repository.AccountRepository
@@ -74,6 +75,7 @@ class MessageReplyReceiver : BroadcastReceiver() {
             .setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setOnlyAlertOnce(true).setAutoCancel(true).setSilent(true)
             .apply { if (sent) setTimeoutAfter(10_000) }
+            .near(context, NotificationHelper.Channel.Messages, stack = false)
             .build()
         try { (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.notify(id, notification) }
         catch (_: SecurityException) { }
