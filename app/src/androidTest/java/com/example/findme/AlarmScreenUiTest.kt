@@ -21,10 +21,7 @@ class AlarmScreenUiTest {
     private fun screenshot(name: String) {
         // Animations run on the test clock: advance into the middle of a ring for the picture.
         compose.mainClock.advanceTimeBy(400)
-        val dir = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
-        compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
-            File(dir, "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-        }
+        TestScreenshots.save(name, compose.onRoot().captureToImage().asAndroidBitmap())
     }
 
     @Test fun showsWhatStartsAndBothActions() {
